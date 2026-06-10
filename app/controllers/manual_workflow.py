@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
 
-from modules.detection.processor import TextBlockDetector
+from modules.detection.processor import TextBlockDetector
 from modules.ocr.processor import OCRProcessor
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
@@ -159,11 +159,12 @@ class ManualWorkflowController:
                     if image is None:
                         continue
                     blk_list = detector.detect(image)
-                    if blk_list:
-                        get_best_render_area(blk_list, image)
                     state = self.main.image_states.get(file_path, {})
                     source_lang = state.get("source_lang", source_lang_fallback)
                     source_lang_en = self.main.lang_mapping.get(source_lang, source_lang)
+                    if blk_list:
+                        get_best_render_area(blk_list, image)
+                    self.main.pipeline.block_detection.annotate_language_if_auto(image, blk_list, source_lang_en)
                     rtl = source_lang_en == "Japanese"
                     results[file_path] = sort_blk_list(blk_list, rtl)
                 return results
