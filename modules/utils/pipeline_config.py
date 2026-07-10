@@ -68,7 +68,7 @@ def validate_ocr(main_page):
     return True
 
 
-def validate_translator(main_page, source_lang, target_lang):
+def validate_translator(main_page, target_lang):
     """Ensure API credentials are set, plus check compatibility."""
     settings_page = main_page.settings_page
     tr = settings_page.ui.tr
@@ -144,10 +144,10 @@ def font_selected(main_page):
         return False
     return True
 
-def validate_settings(main_page, source_lang, target_lang):
+def validate_settings(main_page, target_lang):
     if not validate_ocr(main_page):
         return False
-    if not validate_translator(main_page, source_lang, target_lang):
+    if not validate_translator(main_page, target_lang):
         return False
     if not font_selected(main_page):
         return False

@@ -635,9 +635,8 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         for path in unique_paths:
-            src = self.image_states[path]['source_lang']
             tgt = self.image_states[path]['target_lang']
-            if not validate_settings(self, src, tgt):
+            if not validate_settings(self, tgt):
                 return
 
         self.image_ctrl.clear_page_skip_errors_for_paths(unique_paths)
