@@ -17,7 +17,14 @@ class DetectionEngine(ABC):
     Abstract base class for all detection engines.
     Each model implementation should inherit from this class.
     """
-    
+
+    # fork: seuil de marge minimale (px) entre boîte de bulle et boîte de texte
+    # pour accepter l'appariement bulle/texte. Mesure sur 242 pages (1388 blocs
+    # classés bulle) : les fausses bulles RT-DETR (calées sur des légendes
+    # narratives) ont une marge de 0 à 1 px (374/390 sous 2 px) ; aucune vraie
+    # bulle n'est sous 4 px. Voir specs/decisions.md.
+    MIN_BUBBLE_MARGIN_PX = 3
+
     def __init__(self, settings=None):
         self.settings = settings
         self.backend = resolve_detection_backend()
@@ -95,6 +102,14 @@ class DetectionEngine(ABC):
             
             for bble_box in bubble_boxes:
                 if bble_box is None:
+                    continue
+                # fork: rejeter l'appariement si la bulle est calée à < 3 px
+                # du texte (fausse bulle RT-DETR sur légende narrative, voir
+                # MIN_BUBBLE_MARGIN_PX ci-dessus)
+                bx1, by1, bx2, by2 = bble_box
+                tx1, ty1, tx2, ty2 = txt_box
+                bubble_margin = min(tx1 - bx1, ty1 - by1, bx2 - tx2, by2 - ty2)
+                if bubble_margin < self.MIN_BUBBLE_MARGIN_PX:
                     continue
                 if does_rectangle_fit(bble_box, txt_box):
                     # Text is inside a bubble
