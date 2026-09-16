@@ -14,6 +14,7 @@ from modules.translation.processor import Translator
 from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
 from modules.utils.image_utils import generate_mask
+from modules.cleaning import cleaning_config_from_settings_page  # fork: marge réglable (specs/02)
 from modules.utils.pipeline_config import get_config, get_inpainter_backend, inpaint_map
 from modules.utils.textblock import TextBlock, sort_blk_list
 from modules.utils.translator_utils import is_renderable_translation
@@ -203,7 +204,8 @@ class ChunkMixin:
             mask_blocks.append(mask_block)
         if not mask_blocks:
             return None, None
-        mask = generate_mask(image, mask_blocks)
+        cleaning_cfg = cleaning_config_from_settings_page(self.main_page.settings_page)  # fork: marge réglable
+        mask = generate_mask(image, mask_blocks, free_dilate_iterations=cleaning_cfg.free_dilate_iterations)
         if mask is None or not np.any(mask):
             return None, None
         inpainted = call_inpaint_image(self.inpainting, image, mask, config, blk_list=mask_blocks)

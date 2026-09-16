@@ -4,6 +4,7 @@ from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.spin_box import MSpinBox
 from .utils import create_title_and_combo, set_combo_box_width
 from modules.utils.device import is_gpu_available
+from modules.cleaning import UI_DEFAULTS  # fork: source unique des valeurs par défaut (specs/02)
 
 class ToolsPage(QtWidgets.QWidget):
     def __init__(
@@ -105,6 +106,46 @@ class ToolsPage(QtWidgets.QWidget):
         if not is_gpu_available():
             self.use_gpu_checkbox.setVisible(False)
 
+        # fork: réglages du nettoyage additionnel (specs/02-nettoyage-legendes.md)
+        # Défauts et bornes tirés de UI_DEFAULTS (source unique, modules/cleaning/config.py).
+        self.uniform_fill_checkbox = MCheckBox(self.tr("Automatic flat fill"))
+        self.uniform_fill_checkbox.setChecked(UI_DEFAULTS.uniform_fill)
+        self.uniform_fill_checkbox.setToolTip(
+            self.tr(
+                "Fills a caption's surroundings with a flat color instead of "
+                "running the neural inpainter, when the area right around the "
+                "text is uniform enough."
+            )
+        )
+
+        self.protect_lines_checkbox = MCheckBox(
+            self.tr("Protect thin straight lines (panel borders)")
+        )
+        self.protect_lines_checkbox.setChecked(UI_DEFAULTS.protect_lines)
+        self.protect_lines_checkbox.setToolTip(
+            self.tr(
+                "Removes long thin dark lines from the cleaning mask (panel "
+                "borders, frames). Does not detect panels."
+            )
+        )
+
+        free_margin_layout = QtWidgets.QHBoxLayout()
+        free_margin_label = MLabel(self.tr("Margin around free text (iterations)"))
+        self.free_margin_spinbox = MSpinBox().small()
+        self.free_margin_spinbox.setFixedWidth(70)
+        self.free_margin_spinbox.setMinimum(0)
+        self.free_margin_spinbox.setMaximum(6)
+        self.free_margin_spinbox.setValue(UI_DEFAULTS.free_dilate_iterations)
+        free_margin_layout.addWidget(free_margin_label)
+        free_margin_layout.addWidget(self.free_margin_spinbox)
+        free_margin_layout.addStretch()
+
+        self.cleaning_widgets = QtWidgets.QWidget()
+        cleaning_layout = QtWidgets.QVBoxLayout(self.cleaning_widgets)
+        cleaning_layout.setContentsMargins(5, 5, 5, 5)
+        cleaning_layout.addWidget(self.uniform_fill_checkbox)
+        cleaning_layout.addWidget(self.protect_lines_checkbox)
+        cleaning_layout.addLayout(free_margin_layout)
 
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
@@ -116,6 +157,8 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(inpainter_widget)
         layout.addWidget(inpaint_strategy_widget)
         layout.addWidget(self.hd_strategy_widgets)
+        layout.addSpacing(10)
+        layout.addWidget(self.cleaning_widgets)  # fork
         layout.addSpacing(10)
         layout.addWidget(self.use_gpu_checkbox)
         layout.addStretch(1)

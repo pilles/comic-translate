@@ -11,6 +11,7 @@ from modules.utils.device import resolve_device
 from modules.utils.image_utils import build_block_mask_data, build_bubble_clip_mask, clip_mask_to_bubble, clip_mask_components_to_bubble
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_backend
 from modules.utils.textblock import adjust_text_line_coordinates
+from modules.cleaning import clean_page, cleaning_config_from_settings_page  # fork: N1/N2 (specs/02)
 from pipeline.inpainting_boxes import merge_overlapping_padded_boxes
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
 
@@ -60,8 +61,11 @@ class InpaintingHandler:
     def manual_inpaint(self):
         image_viewer = self.main_page.image_viewer
         settings_page = self.main_page.settings_page
-        mask = image_viewer.get_mask_for_inpainting()
-        
+        cleaning_cfg = cleaning_config_from_settings_page(settings_page)  # fork: N1/N2
+        mask, human_mask = image_viewer.get_mask_for_inpainting(  # fork: marge réglable + traits humains
+            with_parts=True, free_dilate_iterations=cleaning_cfg.free_dilate_iterations
+        )
+
         # Handle webtoon mode vs regular mode differently
         mappings = None
         if self.main_page.webtoon_mode:
@@ -76,8 +80,10 @@ class InpaintingHandler:
 
         config = get_config(settings_page)
         inpaint_blocks = self._get_manual_fast_fill_blocks(mappings)
-        inpaint_input_img = self.inpaint_image(image, mask, config, blk_list=inpaint_blocks or None)
-        inpaint_input_img = imk.convert_scale_abs(inpaint_input_img) 
+        inpaint_input_img = self.inpaint_image(
+            image, mask, config, blk_list=inpaint_blocks or None, protect_mask=human_mask  # fork: consigne #1
+        )
+        inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
 
         return inpaint_input_img
 
@@ -88,12 +94,17 @@ class InpaintingHandler:
         arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
         return arr[:, :qimg.width()]
 
-    def _generate_mask_from_saved_strokes(self, strokes: list[dict], image: np.ndarray):
+    def _generate_mask_from_saved_strokes(
+        self,
+        strokes: list[dict],
+        image: np.ndarray,
+        free_dilate_iterations: int | None = None,  # fork: consigne #1 (marge cohérente lot/manuel)
+    ):
         if image is None or not strokes:
-            return None
+            return None, None
         height, width = image.shape[:2]
         if width <= 0 or height <= 0:
-            return None
+            return None, None
 
         human_qimg = QImage(width, height, QImage.Format_Grayscale8)
         gen_qimg = QImage(width, height, QImage.Format_Grayscale8)
@@ -129,17 +140,19 @@ class InpaintingHandler:
         gen_painter.end()
 
         if not has_any:
-            return None
+            return None, None
 
         human_mask = self._qimage_to_np(human_qimg)
         gen_mask = self._qimage_to_np(gen_qimg)
         kernel = np.ones((5, 5), np.uint8)
         human_mask = imk.dilate(human_mask, kernel, iterations=2)
-        gen_mask = imk.dilate(gen_mask, kernel, iterations=3)
+        # fork: marge réglable (gen_mask seulement, human_mask intact) ; None -> 3 = origine
+        gen_iterations = 3 if free_dilate_iterations is None else free_dilate_iterations
+        gen_mask = imk.dilate(gen_mask, kernel, iterations=gen_iterations)
         mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
         if np.count_nonzero(mask) == 0:
-            return None
-        return mask
+            return None, None
+        return mask, (human_mask > 0)  # fork: expose human_mask pour protect_mask
 
     def _get_manual_fast_fill_blocks(self, mappings: list[dict] | None = None) -> list:
         blocks = getattr(self.main_page, "blk_list", None) or []
@@ -635,7 +648,14 @@ class InpaintingHandler:
         h = int(stats[label, imk.CC_STAT_HEIGHT])
         return num_labels - 1, int(stats[label, imk.CC_STAT_AREA]), (x, y, w, h)
 
-    def inpaint_image(self, image: np.ndarray, mask: np.ndarray, config, blk_list: list | None = None) -> np.ndarray:
+    def inpaint_image(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        config,
+        blk_list: list | None = None,
+        protect_mask: np.ndarray | None = None,  # fork: consigne #1, traits humains
+    ) -> np.ndarray:
         """
         Intelligently chooses between full-image and patch-based inpainting
         based on image size, number of text blocks, and total mask area.
@@ -645,7 +665,21 @@ class InpaintingHandler:
         if mask is None or not np.any(mask):
             return image.copy()
 
-        working_image, working_mask, cleaned_blocks = self._apply_fast_bubble_cleanup(image, mask, blk_list)
+        # fork: N2 (protection des traits) -> bulles (code d'origine, intact) -> N1
+        # (remplissage uni), cf. modules/cleaning. `cleaned_blocks` reste le compte
+        # de bulles nettoyées par _apply_fast_bubble_cleanup seul (consigne #7/M9) :
+        # les composantes N1 "uni" ne l'incrémentent jamais.
+        main_page = getattr(self, "main_page", None)
+        settings_page = getattr(main_page, "settings_page", None)  # fork: defensif (securite mineure #10)
+        cleaning_cfg = cleaning_config_from_settings_page(settings_page)
+        working_image, working_mask, cleaned_blocks, _cleaning_report = clean_page(
+            image,
+            mask,
+            blk_list,
+            cleaning_cfg,
+            protect_mask=protect_mask,
+            bubble_cleanup=self._apply_fast_bubble_cleanup,
+        )
         if cleaned_blocks:
             logger.info("Inpaint hybrid: fast-cleaned %d bubble blocks", cleaned_blocks)
             working_mask, dropped_pixels = self._drop_tiny_residual_components(working_mask)
@@ -732,11 +766,18 @@ class InpaintingHandler:
             return self._inpaint_full_image(working_image, working_mask, config)
 
     def inpaint_page_from_saved_strokes(self, image: np.ndarray, strokes: list[dict], blk_list: list | None = None):
-        mask = self._generate_mask_from_saved_strokes(strokes, image)
+        # fork: consigne #1 (priorité) - marge cohérente + protect_mask=human,
+        # pour que "Nettoyer" ne diverge pas entre page seule et multi-pages.
+        cleaning_cfg = cleaning_config_from_settings_page(self.main_page.settings_page)
+        mask, human_mask = self._generate_mask_from_saved_strokes(
+            strokes, image, free_dilate_iterations=cleaning_cfg.free_dilate_iterations
+        )
         if mask is None:
             return []
         config = get_config(self.main_page.settings_page)
-        inpainted = self.inpaint_image(image, mask, config, blk_list=blk_list or None)
+        inpainted = self.inpaint_image(
+            image, mask, config, blk_list=blk_list or None, protect_mask=human_mask
+        )
         inpainted = imk.convert_scale_abs(inpainted)
         return self._get_regular_patches(mask, inpainted)
 
@@ -842,7 +883,12 @@ class InpaintingHandler:
         return patches
     
     def inpaint(self):
-        mask = self.main_page.image_viewer.get_mask_for_inpainting()
+        # fork: même marge que manual_inpaint(), pour que les contours utilisés
+        # ici pour découper les patchs correspondent au masque réellement nettoyé.
+        cleaning_cfg = cleaning_config_from_settings_page(self.main_page.settings_page)
+        mask, _human_mask = self.main_page.image_viewer.get_mask_for_inpainting(
+            with_parts=True, free_dilate_iterations=cleaning_cfg.free_dilate_iterations
+        )
         painted = self.manual_inpaint()              
         patches = self.get_inpainted_patches(mask, painted)
         return patches         

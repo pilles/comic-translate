@@ -203,10 +203,15 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox
         self.use_gpu_checkbox = self.tools_page.use_gpu_checkbox
+        # fork: nettoyage additionnel (specs/02-nettoyage-legendes.md)
+        self.uniform_fill_checkbox = self.tools_page.uniform_fill_checkbox
+        self.protect_lines_checkbox = self.tools_page.protect_lines_checkbox
+        self.free_margin_spinbox = self.tools_page.free_margin_spinbox
 
         # Credentials
         self.save_keys_checkbox = self.credentials_page.save_keys_checkbox
         self.credential_widgets = self.credentials_page.credential_widgets
+        self.custom_option_widgets = self.credentials_page.custom_option_widgets  # fork: F2
 
         # LLMs
         self.image_checkbox = self.llms_page.image_checkbox

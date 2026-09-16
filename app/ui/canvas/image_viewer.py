@@ -351,9 +351,14 @@ class ImageViewer(QGraphicsView):
             self.photo.setPixmap(QtGui.QPixmap())
         self.zoom = 0
 
-    def get_mask_for_inpainting(self):
-        mask = self.drawing_manager.generate_mask_from_strokes()
-        return mask
+    def get_mask_for_inpainting(
+        self,
+        with_parts: bool = False,  # fork: consigne #1/#5 (protect_mask des traits humains)
+        free_dilate_iterations: int | None = None,  # fork: marge réglable (specs/02)
+    ):
+        return self.drawing_manager.generate_mask_from_strokes(
+            with_parts=with_parts, free_dilate_iterations=free_dilate_iterations
+        )
     
     def create_rect_item(self, rect: QRectF, scene_pos: QPointF = None) -> MoveableRectItem:
         rect_item = MoveableRectItem(rect, None)

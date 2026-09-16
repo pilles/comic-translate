@@ -11,6 +11,7 @@ from app.ui.commands.brush import BrushStrokeCommand, ClearBrushStrokesCommand, 
 from app.ui.commands.base import PathCommandBase as pcb
 import imkit as imk
 from modules.utils.image_utils import build_block_mask_data, clip_mask_to_bubble, clip_mask_components_to_bubble
+from modules.cleaning import cleaning_config_from_settings_page  # fork: marge réglable (specs/02)
 
 
 class DrawingManager:
@@ -249,13 +250,28 @@ class DrawingManager:
                 return True
         return False
         
-    def generate_mask_from_strokes(self):
+    def generate_mask_from_strokes(
+        self,
+        with_parts: bool = False,  # fork: consigne #1/#5 (expose human_mask pour protect_mask)
+        free_dilate_iterations: int | None = None,  # fork: marge réglable (specs/02)
+    ):
+        # fork: repli commun aux sorties anticipées (2-uplet si with_parts, sinon None seul)
+        def _empty():
+            return (None, None) if with_parts else None
+
+        if free_dilate_iterations is None:
+            # fork: appelant n'ayant pas la config sous la main (ex. futur appel direct) :
+            # lit les réglages via la fenêtre principale, repli INERT (marge 3) si introuvable.
+            main_window = self.viewer.window()
+            settings_page = getattr(main_window, "settings_page", None)
+            free_dilate_iterations = cleaning_config_from_settings_page(settings_page).free_dilate_iterations
+
         if not self.viewer.hasPhoto(): 
-            return None
+            return _empty()
         
         # Check if there are any brush strokes to process
         if not self.has_drawn_elements():
-            return None
+            return _empty()
 
         # Handle webtoon mode vs regular mode for getting dimensions
         is_webtoon_mode = self.viewer.webtoon_mode
@@ -263,16 +279,16 @@ class DrawingManager:
             # In webtoon mode, use visible area dimensions
             visible_image, mappings = self.viewer.get_visible_area_image()
             if visible_image is None:
-                return None
+                return _empty()  # fork
             height, width = visible_image.shape[:2]
         else:
             # Regular mode - use photo dimensions
             image_rect = self.viewer.photo.boundingRect()
             width, height = int(image_rect.width()), int(image_rect.height())
-        
+
         # Ensure we have valid dimensions
         if width <= 0 or height <= 0:
-            return None
+            return _empty()  # fork
         
         human_qimg = QImage(width, height, QImage.Format_Grayscale8)
         gen_qimg = QImage(width, height, QImage.Format_Grayscale8)
@@ -341,10 +357,14 @@ class DrawingManager:
         # Dilate using backend (ksize approximated by kernel size)
         kernel = np.ones((5,5), np.uint8)
         human_mask = imk.dilate(human_mask, kernel, iterations=2)
-        gen_mask = imk.dilate(gen_mask, kernel, iterations=3)
+        # fork: marge réglable (gen_mask seulement, human_mask intact) ; None -> 3 = origine
+        gen_iterations = 3 if free_dilate_iterations is None else free_dilate_iterations
+        gen_mask = imk.dilate(gen_mask, kernel, iterations=gen_iterations)
 
         # Combine masks (bitwise_or equivalent)
         final_mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
+        if with_parts:  # fork: consigne #1/#5
+            return final_mask, (human_mask > 0)
         return final_mask
     
     def draw_segmentation_lines(self, text_bbox, image=None, stroke=None):
@@ -365,7 +385,19 @@ class DrawingManager:
         # Ensure the rectangles are visible
         self.viewer._scene.update()
 
-    def make_segmentation_stroke_data(self, text_bbox, image=None):
+    def make_segmentation_stroke_data(
+        self,
+        text_bbox,
+        image=None,
+        free_dilate_iterations: int | None = None,  # fork: marge réglable (specs/02)
+    ):
+        if free_dilate_iterations is None:
+            # fork: manual_workflow.py (hors périmètre) n'a pas encore la config sous la
+            # main pour ce chemin "Segment" ; on la lit nous-mêmes via la fenêtre
+            # principale, repli INERT (marge 3) si introuvable.
+            main_window = self.viewer.window()
+            settings_page = getattr(main_window, "settings_page", None)
+            free_dilate_iterations = cleaning_config_from_settings_page(settings_page).free_dilate_iterations
         blk = text_bbox if hasattr(text_bbox, "xyxy") else None
         bbox = blk.xyxy if blk is not None else text_bbox
         if bbox is None or len(bbox) < 4:
@@ -412,6 +444,7 @@ class DrawingManager:
                         default_padding=5,
                         require_text_or_translation=False,
                         clip_to_bubble=True,
+                        free_dilate_iterations=free_dilate_iterations,  # fork
                     )
                     if crop_mask is not None and bounds is not None:
                         cx1, cy1, _cx2, _cy2 = [int(v) for v in bounds]

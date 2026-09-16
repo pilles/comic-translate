@@ -313,6 +313,7 @@ def build_block_mask_data(
     default_padding: int = 5,
     require_text_or_translation: bool = True,
     clip_to_bubble: bool = False,
+    free_dilate_iterations: int | None = None,  # fork: marge réglable (text_free uniquement, None -> 3 = origine)
 ) -> tuple[np.ndarray | None, tuple[int, int, int, int] | None]:
     from modules.detection.utils.content import detect_content_mask_in_bbox
 
@@ -345,8 +346,10 @@ def build_block_mask_data(
             dilate_iterations=dilate_iterations,
         )
     else:
+        # fork: marge réglable pour le texte hors bulle (None -> 3 = comportement d'origine)
         dil_kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        dilated_crop_mask = imk.dilate(crop_mask, dil_kernel, iterations=dilate_iterations)
+        effective_iterations = dilate_iterations if free_dilate_iterations is None else free_dilate_iterations
+        dilated_crop_mask = imk.dilate(crop_mask, dil_kernel, iterations=effective_iterations)
 
     return dilated_crop_mask, (cx1, cy1, cx2, cy2)
 
@@ -358,6 +361,7 @@ def collect_block_mask_data(
     default_padding: int = 5,
     require_text_or_translation: bool = True,
     clip_to_bubble: bool = True,
+    free_dilate_iterations: int | None = None,  # fork: propagé à build_block_mask_data
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for blk in blk_list:
@@ -367,6 +371,7 @@ def collect_block_mask_data(
             default_padding=default_padding,
             require_text_or_translation=require_text_or_translation,
             clip_to_bubble=clip_to_bubble,
+            free_dilate_iterations=free_dilate_iterations,  # fork
         )
         if crop_mask is None or bounds is None:
             continue
@@ -374,7 +379,12 @@ def collect_block_mask_data(
     return entries
 
 
-def generate_mask(img: np.ndarray, blk_list: list[TextBlock], default_padding: int = 5) -> np.ndarray:
+def generate_mask(
+    img: np.ndarray,
+    blk_list: list[TextBlock],
+    default_padding: int = 5,
+    free_dilate_iterations: int | None = None,  # fork: propagé à collect_block_mask_data
+) -> np.ndarray:
     """
     Generate a text-removal mask from filtered connected components and
     only lightly expand it to catch antialiasing around glyph edges.
@@ -382,7 +392,9 @@ def generate_mask(img: np.ndarray, blk_list: list[TextBlock], default_padding: i
     h, w, _ = img.shape
     mask = np.zeros((h, w), dtype=np.uint8)
 
-    for entry in collect_block_mask_data(img, blk_list, default_padding=default_padding):
+    for entry in collect_block_mask_data(
+        img, blk_list, default_padding=default_padding, free_dilate_iterations=free_dilate_iterations  # fork
+    ):
         cx1, cy1, cx2, cy2 = entry["bounds"]
         crop_mask = entry["mask"]
         mask[cy1:cy2, cx1:cx2] = np.bitwise_or(mask[cy1:cy2, cx1:cx2], crop_mask)

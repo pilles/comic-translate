@@ -9,6 +9,7 @@ from app.shortcuts import get_default_shortcuts
 from .settings_ui import SettingsPageUI
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_user_data_dir, get_default_project_autosave_dir
+from modules.cleaning import UI_DEFAULTS  # fork: replis de load_settings (specs/02)
 
 # Dictionary to map old model names to the newest versions in settings
 OCR_MIGRATIONS = {
@@ -136,6 +137,18 @@ class SettingsPage(QtWidgets.QWidget):
             elif english_service == "Custom":
                 for field in ("api_key", "api_url", "model"):
                     creds[field] = _text_or_none(f"Custom_{field}")
+                # fork: F2 réglages de compatibilité Ollama (widgets optionnels, lecture défensive)
+                custom_option_widgets = getattr(self.ui, "custom_option_widgets", {})
+                disable_reasoning_widget = custom_option_widgets.get("Custom_disable_reasoning")
+                use_max_tokens_widget = custom_option_widgets.get("Custom_use_max_tokens")
+                timeout_widget = custom_option_widgets.get("Custom_timeout")
+                creds["disable_reasoning"] = (
+                    disable_reasoning_widget.isChecked() if disable_reasoning_widget is not None else True
+                )
+                creds["use_max_tokens"] = (
+                    use_max_tokens_widget.isChecked() if use_max_tokens_widget is not None else True
+                )
+                creds["timeout"] = timeout_widget.value() if timeout_widget is not None else 180
             elif english_service == "Yandex":
                 creds['api_key'] = _text_or_none("Yandex_api_key")
                 creds['folder_id'] = _text_or_none("Yandex_folder_id")
@@ -161,6 +174,13 @@ class SettingsPage(QtWidgets.QWidget):
 
         return settings
 
+    def get_cleaning_settings(self):  # fork: nettoyage additionnel (specs/02)
+        return {
+            'uniform_fill': self.ui.uniform_fill_checkbox.isChecked(),
+            'protect_lines': self.ui.protect_lines_checkbox.isChecked(),
+            'free_dilate_iterations': int(self.ui.free_margin_spinbox.value()),
+        }
+
     def get_all_settings(self):
         return {
             'language': self.get_language(),
@@ -171,7 +191,8 @@ class SettingsPage(QtWidgets.QWidget):
                 'detector': self.get_tool_selection('detector'),
                 'inpainter': self.get_tool_selection('inpainter'),
                 'use_gpu': self.is_gpu_enabled(),
-                'hd_strategy': self.get_hd_strategy_settings()
+                'hd_strategy': self.get_hd_strategy_settings(),
+                'cleaning': self.get_cleaning_settings(),  # fork
             },
             'llm': self.get_llm_settings(),
             'export': self.get_export_settings(),
@@ -286,6 +307,20 @@ class SettingsPage(QtWidgets.QWidget):
             settings.remove('credentials')  # Clear all credentials if save_keys is unchecked
         settings.endGroup()
 
+        # fork: F2 réglages de compatibilité Ollama, persistés hors du bloc save_keys
+        custom_option_widgets = getattr(self.ui, "custom_option_widgets", {})
+        disable_reasoning_widget = custom_option_widgets.get("Custom_disable_reasoning")
+        use_max_tokens_widget = custom_option_widgets.get("Custom_use_max_tokens")
+        timeout_widget = custom_option_widgets.get("Custom_timeout")
+        settings.beginGroup('custom_llm')
+        if disable_reasoning_widget is not None:
+            settings.setValue('disable_reasoning', bool(disable_reasoning_widget.isChecked()))
+        if use_max_tokens_widget is not None:
+            settings.setValue('use_max_tokens', bool(use_max_tokens_widget.isChecked()))
+        if timeout_widget is not None:
+            settings.setValue('timeout', int(timeout_widget.value()))
+        settings.endGroup()
+
     def load_settings(self):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
@@ -338,6 +373,19 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.crop_margin_spinbox.setValue(settings.value('crop_margin', 512, type=int))
             self.ui.crop_trigger_spinbox.setValue(settings.value('crop_trigger_size', 512, type=int))
         settings.endGroup()  # hd_strategy
+
+        # fork: nettoyage additionnel (specs/02) ; replis = UI_DEFAULTS (source unique)
+        settings.beginGroup('cleaning')
+        self.ui.uniform_fill_checkbox.setChecked(
+            settings.value('uniform_fill', UI_DEFAULTS.uniform_fill, type=bool)
+        )
+        self.ui.protect_lines_checkbox.setChecked(
+            settings.value('protect_lines', UI_DEFAULTS.protect_lines, type=bool)
+        )
+        self.ui.free_margin_spinbox.setValue(
+            settings.value('free_dilate_iterations', UI_DEFAULTS.free_dilate_iterations, type=int)
+        )
+        settings.endGroup()  # cleaning
         settings.endGroup()  # tools
 
         # Load LLM settings
@@ -404,6 +452,20 @@ class SettingsPage(QtWidgets.QWidget):
                     self.ui.credential_widgets[f"{translated_service}_folder_id"].setText(settings.value(f"{translated_service}_folder_id", ''))
                 else:
                     self.ui.credential_widgets[f"{translated_service}_api_key"].setText(settings.value(f"{translated_service}_api_key", ''))
+        settings.endGroup()
+
+        # fork: F2 réglages de compatibilité Ollama, chargés hors du bloc save_keys
+        custom_option_widgets = getattr(self.ui, "custom_option_widgets", {})
+        settings.beginGroup('custom_llm')
+        disable_reasoning_widget = custom_option_widgets.get("Custom_disable_reasoning")
+        if disable_reasoning_widget is not None:
+            disable_reasoning_widget.setChecked(settings.value('disable_reasoning', True, type=bool))
+        use_max_tokens_widget = custom_option_widgets.get("Custom_use_max_tokens")
+        if use_max_tokens_widget is not None:
+            use_max_tokens_widget.setChecked(settings.value('use_max_tokens', True, type=bool))
+        timeout_widget = custom_option_widgets.get("Custom_timeout")
+        if timeout_widget is not None:
+            timeout_widget.setValue(settings.value('timeout', 180, type=int))
         settings.endGroup()
 
         # Initialize current language tracker after loading

@@ -15,6 +15,7 @@ from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import get_config
 from modules.utils.image_utils import generate_mask, get_smart_text_color
+from modules.cleaning import cleaning_config_from_settings_page  # fork: marge réglable (specs/02)
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations, is_renderable_translation
 from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
@@ -309,7 +310,8 @@ class BatchProcessor:
             
             logger.info("pre-inpaint: generating mask (inpaint_blk_list=%d blocks out of %d)", len(inpaint_blk_list), len(blk_list))
             t0 = time.time()
-            mask = generate_mask(image, inpaint_blk_list)
+            cleaning_cfg = cleaning_config_from_settings_page(settings_page)  # fork: marge réglable (specs/02)
+            mask = generate_mask(image, inpaint_blk_list, free_dilate_iterations=cleaning_cfg.free_dilate_iterations)
             t1 = time.time()
             logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s)", t1 - t0, getattr(mask, 'shape', None))
 
