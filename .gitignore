@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.ruff_cache/
 
 # Settings File
 **/settings.json
@@ -13,14 +14,16 @@ __pycache__/
 env/
 venv/
 
-# uv
-.python-version
-pyproject.toml
-uv.lock
-
 # Test files
 test_*.py
+!tests/test_*.py
 demo_*.py
 benchmarks/
 
 scripts
+bench/pages/
+bench/out/
+*.cbz
+*.cbr
+*.cbt
+*.cb7

@@ -44,12 +44,25 @@ def get_raw_translation(blk_list: list[TextBlock]):
     
     return raw_translations_json
 
-def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
+def build_user_prompt(extra_context: str, raw_text: str) -> str:  # fork: F3 (partagé avec tools/bench_translation.py)
+    """Construit le message utilisateur envoyé au LLM (contrat figé, cf. tests)."""  # fork: F3
+    return f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{raw_text}"  # fork: F3
+
+
+def set_texts_from_json(blk_list: list[TextBlock], json_string: str) -> dict | None:  # fork: F3 signature de retour
+    # fork: F3 garde d'entrée : plus d'exception sur une réponse non-str/vide
+    if not isinstance(json_string, str) or not json_string.strip():  # fork: F3
+        print("Warning: empty or non-string LLM response, no translation applied.")  # fork: F3
+        return None  # fork: F3
     match = re.search(r"\{[\s\S]*\}", json_string)
     if match:
         # Extract the JSON string from the matched regular expression
         json_string = match.group(0)
-        translation_dict = json.loads(json_string)
+        try:  # fork: F3
+            translation_dict = json.loads(json_string)
+        except ValueError as exc:  # fork: F3
+            print(f"Warning: malformed JSON in LLM response, no translation applied. ({exc})")  # fork: F3
+            return None  # fork: F3
         
         for idx, blk in enumerate(blk_list):
             block_key = f"block_{idx}"
@@ -57,8 +70,10 @@ def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
                 blk.translation = translation_dict[block_key]
             else:
                 print(f"Warning: {block_key} not found in JSON string.")
+        return translation_dict  # fork: F3
     else:
         print("No JSON found in the input string.")
+        return None  # fork: F3
 
 def set_upper_case(blk_list: list[TextBlock], upper_case: bool):
     for blk in blk_list:

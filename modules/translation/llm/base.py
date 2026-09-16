@@ -6,7 +6,7 @@ import imkit as imk
 
 from ..base import LLMTranslation
 from ...utils.textblock import TextBlock
-from ...utils.translator_utils import get_raw_text, set_texts_from_json
+from ...utils.translator_utils import get_raw_text, set_texts_from_json, build_user_prompt  # fork: F3
 
 
 class BaseLLMTranslation(LLMTranslation):
@@ -55,7 +55,7 @@ class BaseLLMTranslation(LLMTranslation):
         """
         entire_raw_text = get_raw_text(blk_list)
         system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
-        user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
+        user_prompt = build_user_prompt(extra_context, entire_raw_text)  # fork: F3 (prompt partagé avec le banc)
         
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
         set_texts_from_json(blk_list, entire_translated_text)

@@ -1,0 +1,32 @@
+# Exemple de fichier de cas pour `tools/bench_translation.py --cases fichier.yaml`.
+# Un .json avec le même schéma est aussi accepté.
+#
+# source_lang / target_lang sont optionnels (par défaut : les --source-lang /
+# --target-lang de la ligne de commande, English / French).
+#
+# allow_unchanged :
+#   - absent ou [] : tous les blocs doivent être traduits.
+#   - true : tout le cas peut rester identique à la source (onomatopées...).
+#   - [indices] : seuls ces indices de blocs (0-based) peuvent rester identiques.
+
+source_lang: English
+target_lang: French
+
+cases:
+  - name: Dialogue simple
+    blocks:
+      - "Where were you last night?"
+      - "I told you, I was at the lab."
+      - "You're lying to me."
+
+  - name: Onomatopées
+    blocks:
+      - "KRAKOOM!"
+      - "#@$%!"
+    allow_unchanged: true
+
+  - name: Un bloc autorisé à rester identique
+    blocks:
+      - "Hello there."
+      - "BOOM!"
+    allow_unchanged: [1]

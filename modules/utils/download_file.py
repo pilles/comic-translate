@@ -24,13 +24,15 @@ import urllib.request
 from contextlib import contextmanager
 from typing import Optional
 
+from .ssl_context import get_ssl_context  # fork: F1 contexte TLS de repli
+
 CHUNK_SIZE = 64 * 1024  # 64KB per read
 
 
 @contextmanager
 def _open_url(url: str, *, headers: Optional[dict] = None, timeout: Optional[float] = None):
     req = urllib.request.Request(url, headers=headers or {})
-    response = urllib.request.urlopen(req, timeout=timeout)  # nosec - controlled sources
+    response = urllib.request.urlopen(req, timeout=timeout, context=get_ssl_context())  # fork: F1 contexte TLS de repli
     try:
         yield response
     finally:

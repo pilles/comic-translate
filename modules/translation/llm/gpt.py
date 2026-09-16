@@ -16,6 +16,7 @@ class GPTTranslation(BaseLLMTranslation):
         self.api_key = None
         self.api_base_url = "https://api.openai.com/v1"
         self.supports_images = True
+        self.request_timeout = 80  # fork: F2 timeout configurable (Custom uniquement)
     
     def initialize(self, settings: Any, source_lang: str, target_lang: str, model_name: str, **kwargs) -> None:
         """
@@ -99,7 +100,7 @@ class GPTTranslation(BaseLLMTranslation):
                 f"{self.api_base_url}/chat/completions",
                 headers=headers,
                 data=json.dumps(payload),
-                timeout=80
+                timeout=self.request_timeout  # fork: F2 timeout configurable (Custom uniquement)
             )
             
             response.raise_for_status()

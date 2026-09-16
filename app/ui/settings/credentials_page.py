@@ -2,6 +2,7 @@ from PySide6 import QtWidgets, QtCore
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.line_edit import MLineEdit
 from ..dayu_widgets.check_box import MCheckBox
+from ..dayu_widgets.spin_box import MSpinBox  # fork: F2 réglage du timeout Custom
 from .utils import set_label_width
 
 class CredentialsPage(QtWidgets.QWidget):
@@ -10,6 +11,7 @@ class CredentialsPage(QtWidgets.QWidget):
         self.services = services
         self.value_mappings = value_mappings
         self.credential_widgets: dict[str, MLineEdit] = {}
+        self.custom_option_widgets: dict[str, QtWidgets.QWidget] = {}  # fork: F2 réglages Custom (Ollama)
 
         # main layout (no internal scroll here — outer settings scroll handles it)
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -111,6 +113,30 @@ class CredentialsPage(QtWidgets.QWidget):
                 model_input.set_prefix_widget(model_prefix)
                 service_layout.addWidget(model_input)
                 self.credential_widgets[f"{normalized}_model"] = model_input
+
+                # fork: F2 réglages de compatibilité Ollama (réflexion, max_tokens, timeout)
+                disable_reasoning_checkbox = MCheckBox(self.tr("Disable model reasoning (reasoning_effort: none)"))
+                disable_reasoning_checkbox.setChecked(True)
+                service_layout.addWidget(disable_reasoning_checkbox)
+                self.custom_option_widgets["Custom_disable_reasoning"] = disable_reasoning_checkbox
+
+                use_max_tokens_checkbox = MCheckBox(self.tr("Ollama compatibility: send max_tokens"))
+                use_max_tokens_checkbox.setChecked(True)
+                service_layout.addWidget(use_max_tokens_checkbox)
+                self.custom_option_widgets["Custom_use_max_tokens"] = use_max_tokens_checkbox
+
+                timeout_layout = QtWidgets.QHBoxLayout()
+                timeout_label = MLabel(self.tr("Request timeout"))
+                timeout_spinbox = MSpinBox()
+                timeout_spinbox.setRange(10, 1800)
+                timeout_spinbox.setSuffix(" s")
+                timeout_spinbox.setValue(180)
+                timeout_spinbox.setKeyboardTracking(False)
+                timeout_layout.addWidget(timeout_label)
+                timeout_layout.addWidget(timeout_spinbox)
+                timeout_layout.addStretch()
+                service_layout.addLayout(timeout_layout)
+                self.custom_option_widgets["Custom_timeout"] = timeout_spinbox
 
             elif normalized == "Yandex":
                 api_key_input = MLineEdit()
