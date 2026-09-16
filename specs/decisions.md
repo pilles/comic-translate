@@ -1,0 +1,362 @@
+# Décisions d'architecture (ADR)
+
+## ADR-001 — Base du fork : `filvyb/comic-translate`
+
+Date : 2026-09-12
+Statut : Adoptée
+
+**Contexte** : `ogkalu2/comic-translate` (officiel) impose un compte
+(`is_logged_in()` depuis le commit `3bb8fd3`, 2026-01-28, v2.6.0) même pour un
+traducteur Custom local. `filvyb/comic-translate` (`059046d`, 2026-07-10) suit
+l'officiel sans ce code d'authentification. Voir spec 00 §1.
+
+**Décision** : fork basé sur `filvyb` (`059046d`). `ogkalu2` gardé en remote
+`upstream` pour récupérer des correctifs au cas par cas, pas de merge global.
+Licence Apache-2.0 conservée des deux côtés (`LICENSE`, mentions d'origine).
+
+**Conséquences** : pas de blocage par compte, mais pas de suivi automatique des
+correctifs upstream — veille manuelle nécessaire.
+
+## ADR-002 — `requirements.txt` source unique des dépendances
+
+Date : 2026-09-12
+Statut : Adoptée
+
+**Contexte** : le dépôt a `requirements.txt` (utilisé par `filvyb`/`upstream`)
+et `pyproject.toml`/`uv.lock` (créés par `uv init`/`uv add`) après l'installation
+initiale. Il faut une source de vérité qui ne complique pas les rebase.
+
+**Décision** : `requirements.txt` reste la seule source éditée à la main.
+`pyproject.toml` est généré : bloc `[project].dependencies` entre marqueurs
+`# --- sync_deps: begin/end ---`, régénéré par `tools/sync_deps.py --write`
+(échoue bruyamment si les marqueurs sont absents/dupliqués, jamais de
+réécriture silencieuse). `--check` (défaut) sert de garde-fou en CI/local.
+`uv.lock` et `.python-version` sont versionnés.
+
+Alternative rejetée : `pyproject.toml` avec `dynamic = ["dependencies"]`
+pointant vers `requirements.txt` — écarté car moins explicite pour `uv` et ne
+supprime pas le besoin de vérifier la cohérence.
+
+**Conséquences assumées** : diffs volumineux sur `pyproject.toml`/`uv.lock` et
+conflits possibles sur `.gitignore` lors des rebase sur `filvyb`/`upstream`
+(qui ne connaissent pas ces fichiers) — jugé préférable à une double source de
+vérité qui diverge silencieusement.
+
+## ADR-003 — Pas de relais HTTP entre l'app et Ollama
+
+Date : 2026-09-12
+Statut : Adoptée
+
+**Contexte** : spec 00 §3, décision Philippe : « une couche supplémentaire
+pour rien ».
+
+**Décision** : toute adaptation de requête (réflexion, `max_tokens`, timeout)
+se fait dans l'app (`modules/translation/llm/compat.py`, surcharge de
+`CustomTranslation._make_api_request`), pas via un proxy intermédiaire.
+
+**Conséquences** : le fork dépend du format `/v1` d'Ollama tel qu'observé en
+v0.34.0 ; un changement de comportement d'Ollama impose de revoir `compat.py`
+directement, sans couche d'abstraction supplémentaire à maintenir en échange.
+
+## ADR-004 — Défauts du traducteur Custom pour Ollama
+
+Date : 2026-09-12
+Statut : Adoptée
+
+**Contexte, mesuré sur Ollama 0.34.0 (Mini)** :
+- `translategemma:12b` (famille gemma3, capacités `completion, vision`, pas de
+  `thinking`) + `reasoning_effort: none` + `max_tokens` → 200, JSON valide,
+  ~10 s. Pas de dégradation malgré l'absence de capacité `thinking`.
+- `gemma4:12b-mlx` (capacités `completion, vision, audio, tools, thinking`)
+  sans réglage → réflexion active, budget de tokens consommé dans le champ
+  `reasoning`, `content` vide, `finish_reason: length` (panne d'origine
+  reproduite). Avec `reasoning_effort: none` → JSON complet en 6,5 s.
+- `max_completion_tokens: 5` → ignoré par Ollama (191 tokens générés,
+  `finish_reason: stop`). `max_tokens: 5` → honoré (`finish_reason: length`).
+
+**Décision** : trois réglages Custom persistés indépendamment de « Save Keys »
+(groupe QSettings `custom_llm`) : réflexion désactivée (coché par défaut),
+renommage `max_completion_tokens` → `max_tokens` (coché par défaut), timeout
+180 s (bornes 10–1800, défaut si valeur aberrante). Comportement GPT/OpenAI
+inchangé (`gpt.py` garde `max_completion_tokens`, pas de `reasoning_effort`,
+timeout 80 s codé en dur).
+
+**Conséquences** : le banc utilise la même borne de timeout (10–1800) que
+l'UI ; une valeur `--timeout` hors plage retombe silencieusement sur 180 s.
+
+## ADR-005 — Fuite d'identifiants QSettings constatée et reportée
+
+Date : 2026-09-12
+Statut : Constatée, non corrigée (hors périmètre spec 01)
+
+**Contexte** : dans `app/ui/settings/settings_page.py`, `get_all_settings()`
+inclut `credentials` (groupe QSettings), et `process_group` écrit
+`credentials/<Service>/api_key` en clair sans condition sur « Save Keys ».
+`settings.remove('credentials')` est appelé alors que le code est déjà dans
+`beginGroup('credentials')` : la suppression vise donc `credentials/credentials`
+(no-op). Résultat : décocher « Save Keys » n'efface aucune clé déjà écrite.
+
+**Décision** : mécanisme préexistant à `059046d`, non introduit par le fork
+(le groupe `custom_llm` ajouté par F2 est séparé et ne contient aucun secret).
+Reporté plutôt que corrigé dans ce lot — hors du périmètre spec 01 (socle) et
+non demandé par la conception validée.
+
+**Conséquences** : à corriger dans un lot ultérieur ou à proposer en amont
+(candidat PR, spec 00 §5). Ne pas confondre avec les réglages `custom_llm` du
+fork, qui ne sont pas concernés.
+
+## ADR-006 — Périmètre et stratégie du contexte SSL (F1)
+
+Date : 2026-09-12
+Statut : Adoptée, priorité basse
+
+**Contexte** : panne `SSL: CERTIFICATE_VERIFY_FAILED` constatée le 2026-09-11
+sur l'app **empaquetée** (DMG) au téléchargement du modèle RT-DETR. Depuis les
+sources (`uv run comic.py`, Python 3.12.11 géré par `uv`, OpenSSL 3.0.16) :
+`urlopen('https://huggingface.co/...')` sans contexte renvoie 200,
+`ssl.get_default_verify_paths().openssl_cafile` (`/private/etc/ssl/cert.pem`)
+existe. **La panne ne se reproduit pas depuis les sources et sa cause sur le
+DMG n'a pas été diagnostiquée.**
+
+**Décision** : implémenter tout de même `modules/utils/ssl_context.py` —
+repli sur `certifi` uniquement si aucun magasin système n'est détecté et
+qu'aucune variable `SSL_CERT_FILE`/`SSL_CERT_DIR` n'est définie, jamais de
+désactivation de la vérification. Branché dans `download_file.py`
+(2 lignes `# fork:`). Priorité basse (robustesse et contribution amont
+possible, pas un correctif vérifié de la panne DMG).
+
+**Interdiction explicite** : ne jamais écrire, dans la spec 01 ou ailleurs,
+que F1 corrige la panne du DMG, ni que le critère de réussite spec 01 §6.1
+valide F1 — ce critère porte sur le lancement depuis les sources, où la panne
+ne s'est pas reproduite avant même l'implémentation de F1.
+
+**Hors périmètre** : chemins de téléchargement `pororo` (`urlretrieve` dans
+`pororo/models/brainOCR/utils.py:705`, chemin mort ; `wget` dans
+`pororo/tasks/utils/download_utils.py:292`, OCR coréen) — non couverts par F1.
+
+## ADR-007 — Nettoyage des légendes : option A, point de convergence `inpaint_image`, composantes connexes
+
+Date : 2026-09-13
+Statut : Adoptée
+
+**Contexte** : spec 02, deux flux distincts (lot et manuel) produisent un masque avant
+l'inpainting LaMa, avec des points d'entrée différents (`generate_mask` vs
+`generate_mask_from_strokes`) mais un seul point de convergence commun :
+`InpaintingHandler.inpaint_image` (`pipeline/inpainting.py`).
+
+**Options considérées** :
+- **A (retenue)** : paquet pur `modules/cleaning/` (numpy/mahotas/imkit, zéro Qt, zéro import
+  de `pipeline/`), fonction `clean_page(image, mask, blk_list, cfg, *, protect_mask=None,
+  bubble_cleanup=None)` appelée en un point unique dans `inpaint_image`, avant
+  `_apply_fast_bubble_cleanup`. `bubble_cleanup` est **injecté** par l'appelant (jamais importé
+  par `modules/cleaning`), ce qui garantit qu'un test peut vérifier le contrat sans dépendre de
+  `pipeline/inpainting.py`.
+- **B (rejetée)** : tout le traitement dans `build_block_mask_data` (côté construction du masque
+  par bloc). Rejetée : la re-dilatation déjà présente à cet endroit défait tout travail de
+  protection des traits (N2) fait en amont, et 4 appelants différents auraient dû être modifiés
+  de façon cohérente.
+- **C (rejetée)** : généraliser `_apply_fast_bubble_cleanup` (déjà présent pour les bulles) aux
+  blocs `text_free`. Rejetée : ce code est dans un fichier Qt-adjacent du fork amont, avec des
+  critères déjà entrelacés (bulles, résidus, élagage) ; y ajouter ~150 lignes de logique
+  supplémentaire l'aurait rendu difficile à faire évoluer et à rebaser sur `upstream`.
+
+**Décision** : option A. Architecture par **composantes connexes attribuées par graine**
+(voir spec 02 §3) plutôt qu'un simple anneau bbox : une composante est éligible au remplissage
+uni seulement si sa graine ne revendique qu'un seul bloc `text_free`, à distance suffisante des
+bulles et hors des tracés manuels protégés — sinon elle est laissée intacte (`skip`), jamais
+traitée à moitié.
+
+**Conséquences** : `modules/cleaning/` reste testable en isolation (aucun import Qt/pipeline).
+Le contrat de non-écriture (identité d'objet en config inerte, verbatim du `bubble_cleanup`
+injecté) est la garantie centrale qui permet de prouver par test que les deux cases décochées
+reproduisent l'app d'origine.
+
+## ADR-008 — Protection des fichiers amont contre le formatage automatique
+
+Date : 2026-09-13
+Statut : Adoptée
+
+**Contexte** : un hook global `PostToolUse` sur `Edit|Write` exécute `ruff format` après chaque
+modification de fichier. Pendant l'implémentation de la spec 02, ce hook a reformaté **9 fichiers
+d'origine** (amont, hors `modules/cleaning/`) en intégralité : 1 594 lignes touchées au lieu des
+748 lignes réellement modifiées par le fork. Cela aurait rendu les futurs rebase sur `filvyb`/
+`upstream` beaucoup plus difficiles (diffs illisibles, conflits sur des lignes jamais touchées
+par le fork).
+
+**Réparation** : restauration des fichiers à leur état d'origine (`git checkout` / recopie),
+puis réapplication manuelle des seuls hunks marqués `# fork:`. Résultat : 243 lignes touchées
+sur 33 lignes réellement nécessaires (l'écart restant vient de contexte de diff, pas de
+reformatage).
+
+**Décision** : `[tool.ruff]` dans `pyproject.toml` porte `force-exclude = true` (s'applique même
+aux chemins passés explicitement par le hook Edit/Write) et une liste explicite de dossiers
+d'origine exclus (`app/`, `modules/detection/`, `modules/inpainting/`, `modules/ocr/`,
+`modules/rendering/`, `modules/translation/`, `modules/utils/`, `modules/__init__.py`,
+`pipeline/`, `imkit/`, `controller.py`, `comic.py`, `tests/test_app.py`). Ruff ne traite pas la
+négation (`!motif`) dans `extend-exclude` comme le ferait `.gitignore` pour un sous-dossier d'un
+chemin déjà exclu (vérifié : `!modules/cleaning/` reste sans effet) — les sous-dossiers d'origine
+de `modules/` sont donc énumérés explicitement plutôt que d'exclure `modules/` en bloc.
+`modules/cleaning/` et `tools/` restent lintés et formatés : ce sont des fichiers du fork, pas
+d'origine.
+
+**Conséquences** : ne jamais retirer `force-exclude` ni la liste `extend-exclude` sans revérifier
+qu'un nouveau dossier d'origine touché par le fork y figure. Tout nouveau fichier amont modifié
+(`# fork:`) doit être ajouté à cette liste avant la première édition, pas après.
+
+## ADR-009 — Locale numérique forcée à `C` après `QApplication`
+
+Date : 2026-09-13
+Statut : Adoptée
+
+**Contexte** : « Reconnaître » (OCR) rendait tous les blocs vides sans erreur visible, journal
+`OCR completed and cached for N blocks` malgré des textes vides. Diagnostic : `QApplication`
+applique la locale système (`LC_NUMERIC=fr_FR.UTF-8`, virgule décimale) ; `onnxruntime` 1.30 (CPU,
+macOS arm64), importé plus tard par imports paresseux des moteurs, mésinterprète alors des
+flottants du runtime et renvoie une sortie constante (argmax = blanc) pour le modèle de
+reconnaissance PP-OCR `en_PP-OCRv5_rec_mobile_infer.onnx`, indépendamment de l'image en entrée.
+Reproduit hors app par `locale.setlocale(LC_ALL, "fr_FR.UTF-8")` avant `import onnxruntime` ; non
+reproduit en locale `C`, ni si onnxruntime est importé avant Qt. LaMa (inpainting) et le
+détecteur RT-DETR ne sont pas affectés (sorties identiques au bit près sous les deux locales).
+
+**Décision** : `locale.setlocale(locale.LC_NUMERIC, "C")` juste après la création de
+`QApplication` dans `comic.py` (2 lignes `# fork:`). Vérifié hors écran : 10/10 blocs lus sur une
+page, champ source rempli.
+
+**Alternatives rejetées** :
+- Importer `onnxruntime` avant Qt : fragile, dépend de l'ordre des imports paresseux des moteurs
+  (détection, OCR, inpainting importés à des moments différents selon le flux) — un futur import
+  réordonné referait échouer l'OCR silencieusement.
+- `LC_ALL=C` dans un lanceur externe (script shell, `.plist`) : ne couvre pas `uv run comic.py`
+  lancé directement, le cas d'usage principal en développement.
+
+**Conséquences** : aucune sur l'affichage — seul `LC_NUMERIC` est touché, pas `LC_ALL` ; Qt garde
+sa propre `QLocale` pour l'interface (formats de date, nombres affichés). Candidat PR amont
+(invisible pour des développeurs en locale anglaise, spec 00 §5). Règle ajoutée à `CLAUDE.md` :
+tout script créant une `QApplication` avant d'importer `onnxruntime` doit remettre `LC_NUMERIC` à
+`C` juste après.
+
+## ADR-010 — Jalon 2 nettoyage : contour réel des bulles, traits fins par composantes, mécanismes retirés après mesure
+
+Date : 2026-09-13
+Statut : Adoptée
+
+**Contexte** : calibration sur la capture réelle de Philippe (`funhome_012`, mode manuel) :
+traînées grises sous 3 légendes narratives, bord supérieur des cases rongé. Diagnostic sur le
+banc : légendes collées à un bord de bulle écartées `bulle_proche`/`partagee` (chevauchement
+bulle+7 mesuré 15,6 % et 7,4 %) ; une légende à cadre à la main ondulé non détectée par `run_ge`
+(L=61, part 0,82, `non_uniforme`) ; 11 composantes `sans_bloc` en manuel.
+
+**Décision** :
+
+1. **Chevauchement bulle toléré** jusqu'à `bubble_overlap_max = 0.20` (fraction de la
+   composante) ; résolution multi-propriétaires : un seul text_free + des text_bubble sous le
+   seuil → le text_free est propriétaire unique (au-delà → `bulle_proche` ; deux text_free →
+   `partagee`).
+2. **N2 v2** (`line_detector="components"`, défaut) : traits fins détectés par composantes
+   connexes (pas nécessairement droites) sur un crop de bande (bbox ± (line_band_margin +
+   line_length)), seuil Otsu local aux bandes, garde-fou « bbox texte brute soustraite de la
+   protection », plafond `line_max_protected_share = 0.35` (au-delà : protection abandonnée sur
+   la bande + `logger.warning`, jamais de repli vers `runs`). `run_ge` conservé derrière
+   `line_detector="runs"`, non exposé UI, gardé comme mesure comparée et filet de secours
+   explicite.
+3. **Contour de bulle exclu par construction** : `build_bubble_clip_mask` (fonction libre,
+   `modules/utils/image_utils.py`) dilaté de `bubble_interior_dilation = 4` px, calculé une fois
+   par bulle après le fast-fill (jamais recalculé par composante) ; garde couleur (fast-fill vs
+   médiane de l'anneau ≤ tolérance), sinon repli sur la zone rectangulaire ; repli explicite si le
+   clip est absent/vide (colonne CSV `clip_bulle`). Seuls les pixels réellement peints sont
+   démasqués (`mask_crop[core_fill] = 0`) ; `core \ core_fill` reste masqué pour LaMa — jamais de
+   pixel démasqué non peint.
+4. `mask_entry` figé à l'entrée de N1 (copie de `residual_mask > 0`) : les décisions ne dépendent
+   plus de l'ordre d'attribution des labels.
+5. `core_ratio` calculé sur l'anneau **géométrique avant purge** (dilaté/érodé, avant retrait du
+   masque, du halo protégé et des bulles), seuil 0,90 inchangé.
+
+**Alternatives rejetées, avec la mesure qui les a rejetées** :
+- **Anneau-barrière** (composante de fond adjacente au trait, pour isoler un fond à deux tons) :
+  sur la légende à cadre ondulé (fond bicolore, 1 235 px teintés bleu pâle RVB ≈ 195/222/246),
+  aucun effet mesuré (`n_ring` 6 048 → 5 777) → retiré.
+- **Fusion des fragments par bloc** (`core` = union de toutes les composantes attribuées au même
+  bloc) : le gros de chaque légende reste déjà une composante unique en pratique ; les miettes
+  restantes (≤ 404 px) tombent sous `ring_min_pixels` → LaMa de toute façon. Retenir la fusion
+  aurait exigé une règle « miettes » jugée risquée (texte non inpainté possible si mal groupé) →
+  retiré, `sans_bloc` reste skippé.
+- **Attribution par proximité** (`seed_fallback_distance`, rattacher une composante orpheline au
+  bloc le plus proche) : effet nul ou inconnu sur le corpus disponible → retiré. Colonnes CSV
+  `aire_core`, `bbox_core`, `distance_bloc_le_plus_proche` ajoutées pour réévaluer sur mesure si
+  le besoin réapparaît.
+- **`core_ratio` sur l'anneau après purge** (option initiale) : sur les légendes collées à une
+  bulle, l'amputation de l'anneau côté bulle fait grimper `core_ratio` artificiellement (0,89-0,92
+  au lieu de 0,80 mesuré sur l'anneau géométrique) → écarté au profit de la mesure avant purge.
+
+**Conséquences assumées** :
+- Une légende posée **sur** un bord de case perd la protection de ce bord sur sa largeur (garde-
+  fou bbox texte, point 2) — recrée partiellement le défaut d'origine (spec 02 §1, ligne 3) dans
+  ce cas précis ; figé par test plutôt que corrigé, car l'alternative (ne pas soustraire la bbox
+  texte) laissait passer des hachures chaînées au cadre comme texte fantôme jamais inpainté.
+- Masque de bulle en mode manuel : l'hypothèse « bbox ± `bubble_ring_exclusion` (7 px) contient
+  le masque bulle » n'est vraie qu'à `free_dilate_iterations ≤ 3` ; au-delà (redilatation 5×5 ×
+  itérations), le résidu de masque bulle peut déborder de cette zone — documenté, non corrigé.
+- `connected_components_with_stats` (N1) alloue `np.indices` int64 pleine page (~153 Mo sur un
+  chunk webtoon) pour des centroïdes inutilisés — documenté, non corrigé (candidat optimisation
+  future si le webtoon devient un cas réel de nettoyage).
+- Bug amont trouvé en cours de mesure : `imkit/transforms.py:425-426` surestime largeur/hauteur
+  des composantes de 1 px (bornes de mahotas déjà exclusives) ; compensé côté
+  `modules/cleaning/uniform.py`, `imkit` lui-même non modifié (candidat PR amont, spec 00 §5).
+- `sans_bloc` (composantes fragmentées ne touchant la graine d'aucun bloc en mode manuel, 11 sur
+  la page de référence) reste non résolu : les deux mécanismes candidats (fusion, proximité) ont
+  été mesurés et retirés faute d'effet démontré — à reprendre seulement si une nouvelle mesure le
+  justifie.
+
+## ADR-011 — Marge minimale bulle/texte de 3 px avant appariement en détection
+
+Date : 2026-09-15
+Statut : Adoptée
+
+**Contexte** : capture de Philippe (2026-09-15, page 11 de l'album de test) — masque de
+segmentation d'une légende narrative de 3 lignes en forme d'ellipse tronquant le début de la
+première ligne et la fin de la dernière ; les autres légendes et les bulles étaient correctes.
+Diagnostic : RT-DETR émet une boîte « bulle » calée exactement sur la légende (bulle
+`[31,609,797,682]`, texte `[30,610,797,681]`) ; `create_text_blocks`
+(`modules/detection/base.py`) classe alors le bloc `text_bubble` ; `clip_mask_components_to_bubble`
+ne trouve pas de contour de bulle fermé (il n'y en a pas, RT-DETR a détecté le cadre de la
+légende) et retombe sur l'ellipse inscrite (`build_bubble_clip_mask`), qui tronque les coins du
+rectangle de texte.
+
+**Mesure** (242 pages de l'album, 1 388 blocs classés bulle) : marge minimale entre boîte de
+bulle et boîte de texte (`min(tx1-bx1, ty1-by1, bx2-tx2, by2-ty2)`). Les fausses bulles ont une
+marge de 0 à 1 px (374/390 blocs sous 2 px — 28 % de tous les blocs « bulle » de l'album). Les
+vraies bulles ont une marge ≥ 4 px et un rapport d'aire boîte-bulle/boîte-texte ≥ 1,18 (médiane
+1,69, marge médiane 10 px). Distribution bimodale nette : aucun bloc entre 2 et 4 px, hors 16 cas
+à rapport d'aire 1,33 (marge probablement autour de 2-3 px, non séparés davantage faute de
+nécessité).
+
+**Décision** : `MIN_BUBBLE_MARGIN_PX = 3` en constante de classe sur `DetectionEngine`
+(`modules/detection/base.py`). Dans `create_text_blocks`, l'appariement bulle/texte est rejeté
+si la marge minimale est sous ce seuil, y compris en cas de chevauchement partiel (marge négative
+sur un seul côté, IoU ≥ 0,2) — le bloc redevient `text_free` s'il n'existe pas d'autre bulle
+candidate. 16 lignes `# fork:`, seul point d'appariement du dépôt (le flux webtoon et le flux lot
+appellent tous deux `create_text_blocks`, aucun code dupliqué à corriger ailleurs).
+
+**Alternatives rejetées** :
+- **Corriger à l'étage du masque** (dans `build_bubble_clip_mask` ou
+  `clip_mask_components_to_bubble`, ex. détecter l'absence de contour fermé et ne pas tronquer) :
+  rejetée — le bloc reste classé `text_bubble` à tort, ce qui fausse aussi le fast-fill bulle
+  (`_apply_fast_bubble_cleanup`) et empêche le bloc de bénéficier du chemin légende (spec 02,
+  aplat + protection des cadres). Corriger la classification en amont règle les deux problèmes
+  d'un coup.
+- **Reclasser seulement côté `modules/cleaning`** (heuristique géométrique dans le module de
+  nettoyage, sans toucher à la détection) : rejetée — `modules/cleaning` est un paquet pur sans
+  connaissance du contexte RT-DETR/`TextBlock.bubble_bbox`, et la mauvaise classification
+  `text_bubble` contamine aussi l'OCR/le rendu en aval de la détection, pas seulement le
+  nettoyage. Corriger à la source (détection) est plus simple et couvre tous les usages en aval.
+
+**Conséquences assumées** :
+- Un chevauchement partiel bulle/texte à marge < 3 px est toujours rejeté, y compris dans le cas
+  théorique d'une vraie petite bulle très ajustée au texte — non rencontré dans les 242 pages
+  mesurées, jugé acceptable (conservateur, aucune vraie bulle de l'album n'est concernée par le
+  rejet mesuré).
+- Vérifié sur le banc (9 pages) : blocs bulle 40 → 38 (`funhome_011` et `funhome_020` basculent un
+  bloc chacune vers `text_free`). Le banc de nettoyage (spec 02) doit être relancé sur ces 9 pages
+  avec les nouveaux blocs avant toute nouvelle calibration — les chiffres de couverture §9.2/§12
+  de la spec 02 datent d'avant ce correctif.
+- Candidat PR amont (spec 00 §5) : filtre générique, indépendant du fork Ollama.
