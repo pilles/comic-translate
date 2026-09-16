@@ -2,6 +2,7 @@
 import logging
 import hashlib
 import json
+import locale  # fork: LC_NUMERIC reset below (see comment at QApplication creation)
 import threading
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtCore import QSettings, QTranslator, QLocale, \
@@ -148,6 +149,9 @@ def main():
 
     # Create QApplication directly instead of using the context manager
     app = QApplication(sys.argv)
+    # fork: Qt applies the system locale here; onnxruntime, imported later, then
+    # miscomputes with a decimal comma (silent empty OCR) — reset per Qt docs for C libs.
+    locale.setlocale(locale.LC_NUMERIC, "C")
 
     router = OpenRequestRouter()
     file_open_event_filter = FileOpenEventFilter(router)
