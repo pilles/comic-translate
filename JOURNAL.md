@@ -1,5 +1,55 @@
 # JOURNAL
 
+## 2026-09-16 — Spec 03 jalon A : versions par bloc
+
+- Chaîne complète : architect → critic pass 1 (« Architect must revise », 5 bloquants B1-B5) →
+  conception v2 → critic pass 2 (« Acceptable to proceed », 5 majeurs traités en consignes) →
+  implementer → **tester en cours**. Détail : ADR-012 (`specs/decisions.md`), `specs/
+  03-historique-et-calques.md` §8.
+- Bloquants pass 1, tous levés en v2 : B1 un deuxième « Traduire » souvent servi par le cache sans
+  rappeler le traducteur (édition entre-temps perdue si non captée à l'affectation) ; B2 l'édition
+  du champ traduction réécrit `blk.translation` à chaque frappe, hors commande Qt ; B3 enregistrer
+  seulement la valeur nouvelle perd toute écriture non instrumentée entre deux captures, d'où la
+  règle du **pré-état** ; B4 OCR/traduction en mode bloc unique travaillent sur des copies
+  jetables, le vrai point de convergence est l'**affectation** sur le bloc vivant (6 sites) ; B5
+  `set_upper_case` s'applique après chaque traduction, comparaisons par `casefold`.
+- Décision : module pur `modules/history/versions.py` (`set_text` point d'entrée unique, ordre
+  impératif valeur courante → tête du journal du champ → pré-état → relecture → dédoublonnage →
+  écriture → append), `snapshot`/`record_diff` pour les processeurs OCR/traduction (seul endroit
+  où le nom du moteur est disponible), `flush_pending` dans `save_image_state` (rattrape + élague,
+  fil GUI uniquement), restauration annulable via `RestoreVersionCommand` (`modules/history/
+  commands.py`), bouton + menu « Historique du bloc » (`modules/history/ui.py`). Attribut
+  `versions` paresseux sur `TextBlock`, sérialisé automatiquement par `__dict__`.
+- Alternatives rejetées : versions indexées par identité de bloc (pas d'identifiant stable) ;
+  propriétés `text`/`translation` sur `TextBlock` (casse le chargement des projets de l'app
+  d'origine) ; diff aux seuls processeurs (v1, ne couvre pas B1/B2/B4) ; `app/history/` (exclu de
+  ruff en bloc, ADR-008) → `modules/history/`.
+- Construit : 8 fichiers amont touchés, 29 lignes `# fork:` ; `search_replace.py`, `text.py`,
+  `commands/base.py`, `project_state_v2.py` non touchés.
+- Défauts connus consignés dans ADR-012 : lot (`batch_processor.py:441-443`) remplace `blk_list`,
+  journal perdu ; webtoon non couvert ; Rechercher/Remplacer non instrumenté (rattrapé par le
+  pré-état) ; journal partagé possible après suppression/annulation d'un bloc (aliasing amont
+  préexistant) ; > 2 000 caractères sans historique ; correction de casse pure non journalisée ;
+  volumétrie bornée seulement après flush de la page courante ; `deep_copy` de l'app d'origine
+  perd `versions` sans plantage.
+- Tester : 4 fichiers de tests ajoutés (`tests/test_block_versions_handlers.py`,
+  `tests/_upstream_paths.py`, `tests/_robustness.py`, `tests/test_legacy_ctpr_compat.py`), suivis
+  de 2 correctifs — `set_text(None)` coercé en chaîne vide (robustesse d'appel) ; menu Historique
+  affichant « Aucun historique pour ce bloc » grisé quand le bloc n'a pas de journal (au lieu d'un
+  menu vide ambigu avec « Aucun bloc sélectionné »).
+- Chiffres finaux : `uv run pytest -q` → **213 passés** ; `--gui` complet → **226 passés** + l'échec
+  amont connu de `test_app.py` (préexistant, ADR/JOURNAL du 2026-09-12, hors périmètre). Scénario
+  complet rejoué hors écran avec sauvegarde `.ctpr` et rechargement dans une seconde instance :
+  journal `[translation, manual, cache, restore]` conservé, valeur restaurée en place.
+- Compatibilité ascendante testée : 3 tests de `test_legacy_ctpr_compat.py` passés, ouverture d'un
+  projet antérieur au jalon A via la variable d'environnement `COMIC_TRANSLATE_LEGACY_CTPR=<chemin
+  d'un .ctpr créé avant le jalon>` (tests sautés si la variable est absente ; le fichier contient
+  une page de BD, jamais commité — cohérent avec l'interdit « aucune page de BD dans git »). La
+  contre-épreuve « projet antérieur » de la spec 03 §8 est désormais automatisée par ce test, en
+  plus du protocole manuel.
+- Reste à faire : **test manuel de Philippe** sur `funhome_012` (protocole décrit dans la spec 03
+  §8), commit de ce lot.
+
 ## 2026-09-15 — Hotfix détection : fausses bulles sur les légendes
 
 - Symptôme rapporté par Philippe (capture du 2026-09-15, page 11 de l'album de test) : le masque

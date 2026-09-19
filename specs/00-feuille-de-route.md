@@ -86,7 +86,14 @@ champ source après sélection d'un bloc ; langue source « Auto » colle les li
 - **Glossaire par album** (noms de personnages, termes récurrents) injecté dans le contexte.
 - **Deux polices** : narration vs dialogue, choisies par classe de bloc (`text_free` / `text_bubble`).
 - **Export direct vers Kavita** du CBZ traduit, ComicInfo compris (réutiliser l'existant de `daaLib`).
-- **Retraduire une seule bulle** en gardant les versions précédentes (recoupe la spec 03).
+- **Retraduire une seule bulle** en gardant les versions précédentes (recoupe la spec 03,
+  **fait au jalon A**, ADR-012).
+- **Report positionnel par IoU pour le lot** : le traitement par lot remplace `blk_list` entier
+  pour la page (`pipeline/batch_processor.py:441-443`), ce qui perd le journal de versions des
+  blocs remplacés (ADR-012). Idée en réserve : apparier les anciens et nouveaux blocs par IoU de
+  bbox avant remplacement, reporter `versions` sur le bloc apparié le plus proche — non spécifié,
+  à évaluer seulement si le lot devient un usage réel pour Philippe (aujourd'hui surtout le mode
+  manuel).
 - **Proposer en amont** (pull requests vers `ogkalu2`) les correctifs génériques : `certifi`,
   option « désactiver la réflexion » du traducteur Custom, alias de police `"Arial, Sans-serif"`
   (avertissement Qt au lancement, mesuré le 2026-09-12).

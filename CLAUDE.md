@@ -69,6 +69,11 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
 - `modules/detection/base.py` — `create_text_blocks` (appariement bulle/texte, seul point commun
   lot/webtoon) : `MIN_BUBBLE_MARGIN_PX = 3` rejette l'appariement sous 3 px de marge boîte-bulle/
   boîte-texte (fausses bulles RT-DETR sur légendes, ADR-011).
+- `modules/history/` — versions par bloc (spec 03 jalon A) : `versions.py` (pur, `set_text`
+  point d'entrée unique — toute écriture de `blk.text`/`blk.translation` sur un bloc vivant y
+  passe, jamais de `setattr` direct ; `prune` seulement depuis `flush_pending`, fil GUI),
+  `commands.py` (`RestoreVersionCommand`), `ui.py` (bouton/menu, seul fichier du paquet à importer
+  PySide6, depuis `workspace.py` uniquement). Détail : ADR-012.
 
 ## Traduction locale (Ollama)
 
@@ -108,8 +113,8 @@ retirer `force-exclude`** ; ajouter tout nouveau dossier amont touché par `# fo
   dans le fork (`comic.py`, `locale.setlocale(locale.LC_NUMERIC, "C")` juste après la création de
   `QApplication`, ADR-009). **Règle** : tout script qui crée une `QApplication` avant d'importer
   `onnxruntime` doit remettre `LC_NUMERIC` à `C` juste après.
-- Environnement : Little Snitch peut bloquer `python3.12` de `uv` vers le LAN, symptôme
-  « No route to host » alors que `curl` passe (vu le 2026-09-14/15, résolu par macOS 27 + redémarrage).
+- Environnement : Little Snitch peut bloquer `python3.12` de `uv` vers le LAN (« No route to
+  host » alors que `curl` passe, vu 2026-09-14/15, résolu par macOS 27 + redémarrage).
 
 ## Mémoire projet
 

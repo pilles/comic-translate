@@ -1,5 +1,7 @@
 # Spec 03 — Historique de page et calques dans l'app
 
+> **STATUT : jalon A (E3, versions par bloc) implémenté le 2026-09-16, voir ADR-012
+> (`specs/decisions.md`) et §8 ci-dessous. Test manuel de Philippe en attente.**
 > **STATUT : inventaire réalisé le 2026-09-13, voir `specs/03-inventaire.md`. Arbitrage E1-E4
 > en attente de Philippe.**
 > **STATUT initial : rédigée le 2026-09-11, à valider par Philippe.**
@@ -78,6 +80,7 @@ Hypothèses de manques, **à valider ou réfuter** :
   restaurer une version antérieure en un clic.
   Inventaire : **absent** — `TextBlock.translation` est un champ scalaire unique, écrasé en place
   par 7 chemins (`03-inventaire.md` §1.3, verdict §5, mesure §8.1).
+  **Couvert (jalon A, 2026-09-16)** — voir §8 ci-dessous et ADR-012.
 - **E4 — Découvrabilité** : si l'inventaire montre que 1 et 2 sont couverts, les rendre visibles
   (proposition d'enregistrer le projet à l'ouverture d'un CBZ, champ source toujours affiché).
   Inventaire : **partiellement couvert** — le socle (texte source, historique, patchs) existe et
@@ -86,6 +89,12 @@ Hypothèses de manques, **à valider ou réfuter** :
 
 Philippe arbitre la liste retenue **après** l'inventaire. Ordre de priorité proposé :
 E4 → E1 → E3 → E2.
+
+**Ordre retenu après le jalon A (2026-09-16)** : jalon A = E3 (versions par bloc, fait,
+ci-dessus) → **jalon B** = voir l'original (E1, panneau de calques + touche « voir l'original »)
+→ **jalon C** = pile persistée (E2, journal de page persisté au sens plein, au-delà du seul
+journal de versions du jalon A) → **jalon D** = découvrabilité (E4, mise en visibilité de ce qui
+existe déjà : étiquettes, sauvegarde auto, invite à l'ouverture d'un CBZ).
 
 ## 4. Contraintes de conception
 
@@ -120,3 +129,78 @@ E4 → E1 → E3 → E2.
 - Édition de calques de dessin (pinceau, retouche d'image) au-delà de l'existant.
 - Synchronisation ou sauvegarde distante des projets.
 - Cœur headless, MCP, chat (specs 04 à 06).
+
+## 8. Jalon A — versions par bloc (2026-09-16)
+
+Chaîne : architect → critic pass 1 (« Architect must revise », 5 bloquants B1-B5) → conception v2
+→ critic pass 2 (« Acceptable to proceed », 5 majeurs traités en consignes) → implementer →
+**tester en cours**. Détail complet, alternatives rejetées et défauts connus : ADR-012
+(`specs/decisions.md`).
+
+### Ce qui est construit
+
+- Paquet `modules/history/` : `versions.py` (module pur, sans Qt — `set_text`, `snapshot`/
+  `record_diff`, `flush_pending`, `versions_of`, `prune`), `commands.py`
+  (`RestoreVersionCommand`), `ui.py` (bouton « Historique du bloc » + menu, dans
+  `t_combo_text_layout`, à droite du champ traduction).
+- Attribut `versions` paresseux sur `TextBlock` (jamais déclaré dans `__init__`), sérialisé
+  automatiquement par `__dict__` — aucun encodeur dédié.
+- Enregistrement à l'**affectation** sur le bloc vivant (6 sites, pas dans les processeurs qui
+  travaillent parfois sur des copies jetables) : `ocr_handler.py:46/:80`,
+  `translation_handler.py:56/:87`, `cache_manager.py:339/:346` ; plus le diff dans
+  `OCRProcessor.process` et `Translator.translate` (seul endroit où le nom du moteur est
+  disponible pour `meta`).
+- **Règle du pré-état** : avant d'écraser un champ, la valeur qu'il portait est poussée dans le
+  journal si elle divergeait de la tête — `manual` si le champ avait déjà une entrée, `prior`
+  sinon (décision par champ, pas par bloc).
+- `flush_pending` appelé dans `save_image_state` (changement de page, sauvegarde manuelle/auto,
+  exports) : rattrape les écritures directes (frappe dans les champs) et c'est le seul point qui
+  élague le journal (fil GUI uniquement).
+- Dédoublonnage et marqueur « entrée courante » par `casefold()` (la mise en casse s'applique
+  après chaque traduction, pas seulement au rendu).
+- Plafonds : 12 entrées/champ, 2 000 caractères/valeur, 6 000 caractères/bloc ; la plus ancienne
+  entrée de chaque champ est épinglée.
+- Restauration annulable : `Ctrl+Z` après une restauration retire l'entrée `restore` (jamais le
+  pré-état) ; `_commit_pending_text_command()` appelé d'abord ; `blockSignals` sur les deux champs
+  pour restaurer une valeur de source sans réécrire la traduction (ou l'inverse).
+- 8 fichiers amont touchés, 29 lignes `# fork:` (`textblock.py` 2, `ocr/processor.py` 7,
+  `translation/processor.py` 7, `ocr_handler.py` 3, `translation_handler.py` 3,
+  `cache_manager.py` 3, `image.py` 2, `workspace.py` 2). `search_replace.py`, `text.py`,
+  `commands/base.py`, `project_state_v2.py` **non touchés**.
+
+### Limites (voir ADR-012 pour le détail)
+
+- Le **lot** (`batch_processor.py:441-443`) remplace `blk_list` entier pour la page : journal
+  perdu pour les blocs remplacés. Pas de couverture au jalon A (idée en réserve : report
+  positionnel par IoU, `specs/00-feuille-de-route.md` §5).
+- Le **webtoon** n'est pas couvert (ni flush, ni pré-état sur ses écritures directes).
+- **Rechercher/Remplacer** n'est pas instrumenté ; rattrapé par le pré-état au flush suivant,
+  étiqueté `manual`.
+- Au-delà de 2 000 caractères, un champ n'a plus d'historique (champ écrit quand même).
+- Une correction qui ne change **que la casse** n'est jamais journalisée.
+- La borne de volumétrie n'est garantie qu'après le flush de la page courante.
+- Journal partagé possible entre un bloc supprimé encore référencé et son bloc recréé par
+  annulation (aliasing amont préexistant, non corrigé).
+
+### Point de test manuel de Philippe
+
+Page `funhome_012`, mode manuel, langue source English.
+
+1. Detect → Reconnaître → Traduire.
+2. Corriger une bulle à la main dans le champ de droite (traduction).
+3. Changer de page puis revenir (déclenche le flush).
+4. Bouton **Historique** (icône à droite du champ traduction) : **3 entrées** attendues — OCR,
+   traduction, correction manuelle.
+5. Vider la traduction de cette bulle et « Traduire » le bloc seul via le menu contextuel du
+   rectangle (chemin bloc unique, sert le cache) : **4e entrée** (cache) ; la correction
+   manuelle reste restaurable dans le menu.
+6. Cliquer sur l'entrée de la correction manuelle pour la restaurer.
+7. `Ctrl+S` → fermer l'app → rouvrir → l'historique et la valeur restaurée sont présents.
+
+> Contre-épreuve « projet antérieur » automatisée : `COMIC_TRANSLATE_LEGACY_CTPR=<chemin d'un .ctpr créé avant le jalon> QT_QPA_PLATFORM=offscreen uv run pytest --gui tests/test_legacy_ctpr_compat.py` (3 tests, sautés sans la variable ; le fichier contient une page de BD, jamais commité).
+
+**Contre-épreuves** :
+- `Ctrl+Z` juste après la restauration : la valeur précédente revient, la liste d'historique est
+  inchangée (l'entrée `restore` disparaît, pas le pré-état).
+- Ouvrir un projet `.ctpr` antérieur au jalon A : menu d'historique vide au départ ; la première
+  retraduction crée une entrée `prior` puis une entrée `translation`.

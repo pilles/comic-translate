@@ -360,3 +360,119 @@ appellent tous deux `create_text_blocks`, aucun code dupliqué à corriger aille
   avec les nouveaux blocs avant toute nouvelle calibration — les chiffres de couverture §9.2/§12
   de la spec 02 datent d'avant ce correctif.
 - Candidat PR amont (spec 00 §5) : filtre générique, indépendant du fork Ollama.
+
+## ADR-012 — Versions par bloc : attribut sur `TextBlock`, enregistrement à l'affectation, pré-état et flush
+
+Date : 2026-09-16
+Statut : Adoptée (jalon A de la spec 03, test manuel de Philippe en attente)
+
+**Contexte** : `specs/03-inventaire.md` §1.3 constate que `TextBlock.translation` est un champ
+scalaire unique, écrasé en place par 7 chemins (LLM, cache, mise en casse, édition manuelle,
+Rechercher/Remplacer, lot), sans aucune version conservée (E3 de la spec 03, « absent »). Chaîne
+de conception : architect → critic pass 1 (« Architect must revise », 5 bloquants B1-B5) →
+conception v2 → critic pass 2 (« Acceptable to proceed », 5 majeurs traités en consignes) →
+implementer → tester.
+
+**Bloquants du critic pass 1, retenus dans la conception v2** :
+- **B1** : un deuxième « Traduire » sur un bloc déjà traduit est souvent servi par le cache
+  (`_can_serve_all_blocks_from_translation_cache`), qui ne rappelle jamais le traducteur et écrase
+  `blk.translation` avec la valeur cachée — une édition manuelle entre-temps disparaît sans laisser
+  de trace si l'écriture n'est pas interceptée à l'affectation.
+- **B2** : l'édition du champ traduction réécrit `blk.translation` à chaque frappe
+  (`update_text_block_from_edit`), jamais via une commande Qt — rien à intercepter côté undo/redo,
+  seul le pré-état + flush peut la capter.
+- **B3** : enregistrer seulement la valeur nouvelle perd toute écriture non instrumentée entre deux
+  points de capture (correction manuelle perdue par une retraduction suivante) — d'où la règle
+  « pré-état » : avant d'écraser un champ, pousser la valeur qu'il portait si elle divergeait de la
+  tête du journal.
+- **B4** : OCR et traduction en mode bloc unique travaillent sur des **copies jetables**
+  (`deep_copy`) — instrumenter les processeurs journaliserait sur des objets détruits ; le vrai
+  point de convergence est l'**affectation** sur le bloc vivant (6 sites : `ocr_handler.py:46/:80`,
+  `translation_handler.py:56/:87`, `cache_manager.py:339/:346`).
+- **B5** : `set_upper_case` s'applique après chaque traduction, pas seulement au rendu — la
+  comparaison de tête doit être insensible à la casse (`casefold`), sinon le marqueur « entrée
+  courante » n'est jamais vrai et une correction de casse pure crée une fausse entrée.
+
+**Décision** — module pur `modules/history/versions.py` (aucun import PySide6, importable depuis
+un worker et depuis les tests hors `--gui`) :
+- `set_text(blk, field, value, origin, meta)` est le point d'entrée unique pour une écriture
+  instrumentée. Ordre impératif (consigne Ma du critic pass 2) : valeur courante → tête du journal
+  **du champ** → pré-état si la valeur courante divergeait de la tête (`manual` si le champ avait
+  déjà une tête, `prior` sinon — décision par champ, pas par bloc, consigne Mc) → relecture de la
+  tête → dédoublonnage par `casefold` contre la nouvelle tête → `setattr` **dans tous les cas**
+  (consigne Mb, y compris dédoublonnage ou dépassement de plafond) → `append` si ni dédoublonné ni
+  rejeté. Invariant après appel (sauf rejet `MAX_VALUE_CHARS`) :
+  `versions_of(blk, field)[-1]["value"].casefold() == getattr(blk, field).casefold()`.
+- `snapshot`/`record_diff` couvrent les processeurs OCR/traduction (`OCRProcessor.process`,
+  `Translator.translate`) — seul endroit où le nom du moteur (`ocr_model`, `translator_key`) est
+  disponible pour `meta` ; le diff porte sur le bloc vivant après que le moteur a déjà écrit le
+  champ.
+- `flush_pending(blk_list)` rattrape les écritures non instrumentées (frappe directe dans les
+  champs source/traduction, B2) par le mécanisme du pré-état, et c'est le **seul** point qui élague
+  le journal (`prune`) — restreint au fil GUI (une entrée ajoutée par un worker est sûre, une
+  suppression concurrente ne l'est pas). Appelé depuis `save_image_state`
+  (`app/controllers/image.py:1020-1029`), point de passage unique vérifié pour changement de page,
+  sauvegarde manuelle/auto, exports et multi-pages.
+- Journal en place, jamais de réaffectation : `blk.__dict__.setdefault("versions", [])`, `append`
+  seulement — un `RectCommandBase` (`app/ui/commands/base.py:174-178`) peut faire pointer deux
+  `TextBlock` vivants vers la même liste après une suppression annulée ; réaffecter casserait cet
+  aliasing préexistant (déjà présent pour `texts`/`lines`).
+- Restauration : `commands.py` (`RestoreVersionCommand`), zéro ligne amont. `redo` :
+  `_commit_pending_text_command()` d'abord (une édition en attente à 400 ms ne doit pas écraser la
+  restauration), puis `set_text(origin=restore)`, puis `apply_text_from_command` si le bloc a un
+  item de texte rendu ; `blockSignals` sur `s_text_edit` **et** `t_text_edit` pour éviter qu'écrire
+  dans un champ ne déclenche la réécriture de l'autre. `undo` : retire l'entrée `restore` seulement
+  si elle est en tête (`pop_head_if_origin`), ne retire jamais le pré-état qu'elle a pu créer.
+- Sérialisation : `versions` est un attribut `list[dict]` de types simples (str/dict), donc
+  automatiquement sérialisé par `TextBlock.__dict__` (`app/projects/parsers.py:57-63/:174-178`) —
+  aucun encodeur dédié nécessaire.
+- Plafonds : 12 entrées par champ, 2 000 caractères par valeur (au-delà : champ écrit quand même,
+  aucune entrée, un seul avertissement journalisé), 6 000 caractères par bloc toutes entrées
+  confondues ; la plus ancienne entrée de chaque champ est épinglée (« texte d'origine »), FIFO
+  sinon.
+
+**Alternatives rejetées** :
+- **Versions dans `image_state`, indexées par identité de bloc** : rejetée, aucun identifiant
+  stable sur `TextBlock` (`xyxy` bouge à chaque déplacement/redimensionnement) — l'indexation
+  romprait à la première édition de géométrie.
+- **Propriétés `text`/`translation` sur `TextBlock`** (interception à la lecture/écriture) :
+  rejetée — renommer le stockage sous-jacent casserait le chargement des projets de l'app
+  d'origine (blocs vides à l'ouverture, `__dict__.update` de `parsers.py:174-178` court-circuite
+  toute property) ; une casse ou une frappe intermédiaire polluerait aussi le journal sans le
+  filtre du pré-état.
+- **Diff aux seuls processeurs** (v1 du critic, sans les 6 sites d'affectation) : rejetée — ne voit
+  ni le cache du deuxième « Traduire » (B1), ni les copies jetables du chemin bloc unique (B4), ni
+  l'édition du champ avant tout rendu (B2) ; les 5 bloquants du critic pass 1 portent tous sur
+  cette omission.
+- **`app/history/`** comme emplacement du paquet : rejeté, `app/` est exclu de ruff en bloc
+  (ADR-008, dossier amont) — `modules/history/` reste linté comme `modules/cleaning/` et `tools/`.
+
+**Conséquences et défauts connus (à ne pas « corriger par surprise »)** :
+- Le traitement par **lot** remplace `blk_list` entier pour la page
+  (`pipeline/batch_processor.py:441-443`) sans passer par `set_text` : le journal des blocs
+  remplacés est perdu. Pas de report positionnel par IoU au jalon A (idée en réserve,
+  `specs/00-feuille-de-route.md` §5).
+- Le **webtoon** n'appelle ni `flush_pending` ni, par construction, le pré-état sur ses propres
+  écritures directes d'état de page — non couvert au jalon A.
+- **Rechercher/Remplacer** n'est pas instrumenté (coupe retenue par le critic pass 2, consigne
+  mineure 6) : ses deux sites d'écriture (`app/controllers/search_replace.py:956-964`, `:986-993`)
+  sont rattrapés par le pré-état au flush suivant, avec l'étiquette `manual` plutôt qu'une origine
+  dédiée.
+- **Journal partagé possible** entre un bloc supprimé encore référencé dans un `image_states`
+  périphérique et son bloc recréé par annulation : aliasing amont de `RectCommandBase`
+  (`app/ui/commands/base.py:174-178`), volontairement non dé-aliasé (voir alternatives rejetées) —
+  peut produire une entrée fantôme jusqu'au prochain `save_image_state`.
+- Au-delà de **2 000 caractères**, un champ n'a plus d'historique (champ écrit, aucune entrée,
+  un seul avertissement journalisé, pas par occurrence).
+- Une correction qui ne change **que la casse** n'est jamais journalisée (dédoublonnage par
+  `casefold`, nécessaire à cause de B5 — `set_upper_case` s'applique après chaque traduction).
+- La borne de volumétrie (≤ 8 000 caractères par bloc) n'est garantie **qu'après le flush de la
+  page courante** — non bornée pour une page jamais rouverte dans la session (append en place sans
+  prune tant que `flush_pending` n'est pas passé).
+- Dans l'**app d'origine** (si un `.ctpr` du fork y est rouvert) : `TextBlock.deep_copy` amont ne
+  recopie pas `versions` (champs recopiés un par un) — dégradation silencieuse, sans plantage,
+  conforme à la contrainte de compatibilité ascendante de la spec 03 §4.1.
+
+**Conséquences générales** : toute nouvelle écriture de `blk.text`/`blk.translation` sur un bloc
+vivant doit passer par `modules.history.versions.set_text` (ou `snapshot`/`record_diff` pour un
+processeur qui écrit le champ lui-même) — règle ajoutée à `CLAUDE.md`.
