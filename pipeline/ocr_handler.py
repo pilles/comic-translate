@@ -1,4 +1,5 @@
 import logging
+from modules.history import versions as history_versions  # fork: historique par bloc (jalon A)
 from modules.ocr.processor import OCRProcessor
 from modules.utils.device import resolve_device
 from modules.utils.language_utils import to_canonical_language_name
@@ -43,7 +44,7 @@ class OCRHandler:
                     # Check if block exists in cache (even if text is empty)
                     cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
                     if cached_text is not None:  # Block was processed before (even if text is empty)
-                        blk.text = cached_text
+                        history_versions.set_text(blk, "text", cached_text, "cache_ocr", {"ocr": ocr_model})  # fork: historique par bloc (jalon A)
                         logger.info(f"Using cached OCR result for block: '{cached_text}'")
                         return
                     else:
@@ -77,7 +78,7 @@ class OCRHandler:
                         # Cache using the original blocks to maintain consistent IDs
                         self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list, all_blocks_copy)
                         cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
-                        blk.text = cached_text
+                        history_versions.set_text(blk, "text", cached_text, "ocr", {"ocr": ocr_model})  # fork: historique par bloc (jalon A)
                         logger.info(f"Cached OCR results and extracted text for block: {cached_text}")
             else:
                 # For full page OCR, check if we can use cached results

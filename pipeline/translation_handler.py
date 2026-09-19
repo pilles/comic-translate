@@ -1,4 +1,5 @@
 import logging
+from modules.history import versions as history_versions  # fork: historique par bloc (jalon A)
 from modules.translation.processor import Translator
 from modules.utils.translator_utils import set_upper_case
 from modules.utils.language_utils import to_canonical_language_name
@@ -53,7 +54,7 @@ class TranslationHandler:
                     # Check if block exists in cache and source text matches
                     cached_translation = self.cache_manager._get_cached_translation_for_block(translation_cache_key, blk)
                     if cached_translation is not None:  # Block was processed and source text matches
-                        blk.translation = cached_translation
+                        history_versions.set_text(blk, "translation", cached_translation, "cache", {"model": translator_key})  # fork: historique par bloc (jalon A)
                         logger.info(f"Using cached translation result for block: '{cached_translation}'")
                         set_upper_case([blk], upper_case)
                         return
@@ -84,7 +85,7 @@ class TranslationHandler:
                         # Cache using the original blocks to maintain consistent IDs
                         self.cache_manager._cache_translation_results(translation_cache_key, self.main_page.blk_list, all_blocks_copy)
                         cached_translation = self.cache_manager._get_cached_translation_for_block(translation_cache_key, blk)
-                        blk.translation = cached_translation
+                        history_versions.set_text(blk, "translation", cached_translation, "translation", {"model": translator_key})  # fork: historique par bloc (jalon A)
                         logger.info(f"Cached translation results and extracted translation for block: {cached_translation}")
                     
                     set_upper_case([blk], upper_case)

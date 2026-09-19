@@ -1,7 +1,8 @@
 """Configuration pytest partagée (spec 01 §5).
 
-- `--gui` : sans cette option, `tests/test_app.py` et
-  `tests/test_manual_mask_equivalence.py` (Qt) sont écartés de la collecte,
+- `--gui` : sans cette option, `tests/test_app.py`,
+  `tests/test_manual_mask_equivalence.py`, `tests/test_history_restore.py`
+  et `tests/test_legacy_ctpr_compat.py` (Qt) sont écartés de la collecte,
   pour permettre `uv run pytest` sans dépendance display/offscreen.
 - Fixture `llm_server` : serveur HTTP local (`ThreadingHTTPServer`) qui imite
   un endpoint OpenAI-compatible (`/v1/models`, `/v1/chat/completions`), routes
@@ -29,7 +30,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-_GUI_ONLY_FILES = {"test_app.py", "test_manual_mask_equivalence.py"}
+_GUI_ONLY_FILES = {
+    "test_app.py",
+    "test_manual_mask_equivalence.py",
+    "test_history_restore.py",
+    "test_legacy_ctpr_compat.py",  # fork: historique par bloc (jalon A) — vérification tester
+}
 
 
 def pytest_ignore_collect(collection_path, config: pytest.Config) -> bool | None:

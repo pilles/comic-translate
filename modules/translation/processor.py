@@ -1,6 +1,7 @@
 import numpy as np
 
 from ..utils.textblock import TextBlock
+from ..history import versions as history_versions  # fork: historique par bloc (jalon A)
 from .base import LLMTranslation
 from .factory import TranslationFactory
 
@@ -95,9 +96,16 @@ class Translator:
         Returns:
             List of updated TextBlock objects with translations
         """
+        before = history_versions.snapshot(blk_list, "translation")  # fork: historique par bloc (jalon A)
         if self.is_llm_engine:
             # LLM translators need image and extra context
-            return self.engine.translate(blk_list, image, extra_context)
+            result = self.engine.translate(blk_list, image, extra_context)  # fork: historique par bloc (jalon A)
         else:
             # Text-based translators only need the text blocks
-            return self.engine.translate(blk_list)
+            result = self.engine.translate(blk_list)  # fork: historique par bloc (jalon A)
+
+        history_versions.record_diff(  # fork: historique par bloc (jalon A)
+            blk_list, "translation", before, "translation",
+            {"model": self.translator_key, "target": self.target_lang_en}
+        )  # fork: historique par bloc (jalon A)
+        return result  # fork: historique par bloc (jalon A)

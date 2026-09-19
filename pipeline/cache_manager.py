@@ -1,6 +1,8 @@
 import hashlib
 import logging
 
+from modules.history import versions as history_versions  # fork: historique par bloc (jalon A)
+
 logger = logging.getLogger(__name__)
 
 
@@ -336,11 +338,11 @@ class CacheManager:
         for block in block_list:
             cached_text = self._get_cached_text_for_block(cache_key, block)
             if cached_text is not None: 
-                block.text = cached_text  
+                history_versions.set_text(block, "text", cached_text, "cache_ocr", {"ocr": cache_key[1]})  # fork: historique par bloc (jalon A)
 
     def _apply_cached_translations_to_blocks(self, cache_key, block_list):
         """Apply cached translation results to all blocks in the list"""
         for block in block_list:
             cached_translation = self._get_cached_translation_for_block(cache_key, block)
             if cached_translation is not None: 
-                block.translation = cached_translation  
+                history_versions.set_text(block, "translation", cached_translation, "cache", {"model": cache_key[1]})  # fork: historique par bloc (jalon A)

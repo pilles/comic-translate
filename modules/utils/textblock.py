@@ -108,7 +108,10 @@ class TextBlock(object):
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
         new_block.direction = self.direction
-        
+
+        if hasattr(self, "versions"):  # fork: historique par bloc (jalon A), copie plate (jamais partagée)
+            new_block.versions = [dict(v, meta=dict(v.get("meta", {}))) for v in self.versions]  # fork: historique par bloc (jalon A)
+
         return new_block
 
 def sort_blk_list(blk_list: List[TextBlock], right_to_left=None) -> List[TextBlock]:

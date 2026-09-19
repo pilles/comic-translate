@@ -5,6 +5,7 @@ from modules.utils.textblock import TextBlock
 from modules.utils.language_utils import language_codes, \
     get_lang_code_for_script, get_ocr_bucket_for_script, \
     get_dominant_page_script, is_supported_script, normalize_script
+from modules.history import versions as history_versions  # fork: historique par bloc (jalon A)
 from .factory import OCRFactory
 _MANGA_OCR_CLASS_NAMES = {"MangaOCRMobileONNXEngine", "MangaOCREngine", "MangaOCREngineONNX"}
 
@@ -60,12 +61,18 @@ class OCRProcessor:
         """
 
         self._set_source_language(blk_list)
+        before = history_versions.snapshot(blk_list, "text")  # fork: historique par bloc (jalon A)
 
         if self.source_lang_english == 'Auto':
-            return self._process_auto(img, blk_list)
+            result = self._process_auto(img, blk_list)  # fork: historique par bloc (jalon A)
+        else:
+            engine = OCRFactory.create_engine(self.settings, self.source_lang_english, self.ocr_key)
+            result = self._dispatch_with_override(img, blk_list, engine)  # fork: historique par bloc (jalon A)
 
-        engine = OCRFactory.create_engine(self.settings, self.source_lang_english, self.ocr_key)
-        return self._dispatch_with_override(img, blk_list, engine)
+        history_versions.record_diff(  # fork: historique par bloc (jalon A)
+            blk_list, "text", before, "ocr", {"ocr": self.ocr_key, "lang": self.source_lang_english}
+        )  # fork: historique par bloc (jalon A)
+        return result  # fork: historique par bloc (jalon A)
 
     def _process_auto(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         """Route each block to an OCR engine using block script plus a page-level fallback."""

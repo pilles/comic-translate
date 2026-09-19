@@ -18,6 +18,7 @@ from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from modules.history.ui import attach_block_history_button  # fork: historique par bloc (jalon A)
 
 
 class WorkspaceMixin:
@@ -164,6 +165,7 @@ class WorkspaceMixin:
         self.t_text_edit = MTextEdit()
         self.t_text_edit.setFixedHeight(120)
         t_combo_text_layout.addWidget(self.t_text_edit)
+        self.block_history_button = attach_block_history_button(self, t_combo_text_layout)  # fork: historique par bloc (jalon A)
         input_layout.addLayout(t_combo_text_layout)
 
         text_render_layout = QtWidgets.QVBoxLayout()

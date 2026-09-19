@@ -16,6 +16,7 @@ from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
+from modules.history import versions as history_versions  # fork: historique par bloc (jalon A)
 from modules.utils.language_utils import to_canonical_language_name, to_ui_language_label
 
 if TYPE_CHECKING:
@@ -1019,6 +1020,7 @@ class ImageStateController:
 
     def save_image_state(self, file: str):
         # For regular mode only
+        history_versions.flush_pending(self.main.blk_list)  # fork: historique par bloc (jalon A), avant la copie
         skip_status = self.main.image_states.get(file, {}).get('skip', False)
         self.main.image_states[file] = self._build_image_state(
             file,
