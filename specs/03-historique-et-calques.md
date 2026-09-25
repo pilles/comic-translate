@@ -1,5 +1,7 @@
 # Spec 03 — Historique de page et calques dans l'app
 
+> **STATUT : jalon B (E1, voir l'original) implémenté le 2026-09-19, voir ADR-013
+> (`specs/decisions.md`) et §9 ci-dessous. Test manuel de Philippe en attente.**
 > **STATUT : jalon A (E3, versions par bloc) implémenté le 2026-09-16, voir ADR-012
 > (`specs/decisions.md`) et §8 ci-dessous. Test manuel de Philippe en attente.**
 > **STATUT : inventaire réalisé le 2026-09-13, voir `specs/03-inventaire.md`. Arbitrage E1-E4
@@ -71,6 +73,9 @@ Hypothèses de manques, **à valider ou réfuter** :
   « voir l'original » pour comparer instantanément.
   Inventaire : **absent** — couches physiquement distinctes mais aucune visibilité par couche,
   aucune touche « voir l'original » (`03-inventaire.md` §4, verdict §5).
+  **Couvert partiellement (jalon B, 2026-09-19)** — bascule bouton + touche Alt maintenue voir
+  §9 ci-dessous et ADR-013 ; visibilité par couche (calque de nettoyage isolé, par exemple) non
+  couverte.
 - **E2 — Journal de page persisté** : liste horodatée des opérations (détection, OCR, traduction
   avec modèle et contexte utilisés, nettoyage avec méthode, éditions manuelles), sauvegardée dans
   le `.ctpr`, consultable dans un panneau.
@@ -90,11 +95,11 @@ Hypothèses de manques, **à valider ou réfuter** :
 Philippe arbitre la liste retenue **après** l'inventaire. Ordre de priorité proposé :
 E4 → E1 → E3 → E2.
 
-**Ordre retenu après le jalon A (2026-09-16)** : jalon A = E3 (versions par bloc, fait,
-ci-dessus) → **jalon B** = voir l'original (E1, panneau de calques + touche « voir l'original »)
-→ **jalon C** = pile persistée (E2, journal de page persisté au sens plein, au-delà du seul
-journal de versions du jalon A) → **jalon D** = découvrabilité (E4, mise en visibilité de ce qui
-existe déjà : étiquettes, sauvegarde auto, invite à l'ouverture d'un CBZ).
+**Ordre retenu après le jalon A (2026-09-16)** : jalon A = E3 (versions par bloc, fait, §8) →
+jalon B = voir l'original (E1, fait le 2026-09-19, §9) → **jalon C** = pile persistée (E2,
+journal de page persisté au sens plein, au-delà du seul journal de versions du jalon A) →
+**jalon D** = découvrabilité (E4, mise en visibilité de ce qui existe déjà : étiquettes,
+sauvegarde auto, invite à l'ouverture d'un CBZ). Prochain jalon : **C**.
 
 ## 4. Contraintes de conception
 
@@ -204,3 +209,76 @@ Page `funhome_012`, mode manuel, langue source English.
   inchangée (l'entrée `restore` disparaît, pas le pré-état).
 - Ouvrir un projet `.ctpr` antérieur au jalon A : menu d'historique vide au départ ; la première
   retraduction crée une entrée `prior` puis une entrée `translation`.
+
+## 9. Jalon B — voir l'original (2026-09-19)
+
+Chaîne : architect → critic pass 1 (« Architect must revise », touche de composition clavier Mac
+français en conflit avec la saisie, voile « collé » en cas de relâchement manqué, clics avalés) →
+conception v2 → critic pass 2 (« Acceptable to proceed », 2 consignes bloquantes) → implementer.
+Détail complet, alternatives rejetées et limites : ADR-013 (`specs/decisions.md`).
+
+### Ce qui est construit
+
+- `modules/view/original.py` (nouveau paquet, importe PySide6) : `OriginalViewImageViewer`,
+  sous-classe d'`ImageViewer` qui peint le voile dans `drawForeground` — fond opaque puis la photo
+  d'origine par-dessus tous les items de la scène. **Rien n'est modifié dans la scène** :
+  `scene.render()` (export image/CBZ/PDF/PSD, « enregistrer l'image courante » Cmd+E) ignore le
+  voile par construction, mesuré ; OCR/détection/traduction/nettoyage y sont insensibles ; aucune
+  levée temporaire nulle part.
+- Deux déclencheurs combinés (`_veil_active`) : bouton **Original** (checkable, colonne Outils à
+  côté de Pan, hors outils exclusifs, s'enfonce pendant Alt) et touche **Alt/Option** maintenue.
+
+  Règles d'armement de la touche Alt :
+
+  | Condition | Effet si non remplie |
+  |---|---|
+  | Espace de travail actif | Alt sans effet |
+  | Aucune fenêtre modale ouverte | Alt sans effet |
+  | Fenêtre principale active | Alt sans effet |
+  | Aucune saisie en cours (champ éditable focalisé ou bulle en édition sur le canevas) | Alt sans effet |
+  | Pas en mode webtoon | Alt sans effet, bouton grisé |
+
+  Désarmement sur relâchement d'Alt, désactivation de la fenêtre, changement d'état applicatif, et
+  resynchronisation sur l'état réel du clavier au premier événement suivant (rattrape un
+  relâchement manqué par l'app — feuille native, changement d'app).
+- Aucun clic avalé : les éléments de la scène restent cliquables sous le voile (dit dans
+  l'infobulle du bouton).
+- Webtoon : voile jamais peint (garde indépendante de l'état du bouton), bouton grisé.
+- Rien n'est persisté (`.ctpr`, QSettings) — état de vue pure.
+- 5 lignes `# fork:` (`window.py` 2, `workspace.py` 2, `tests/conftest.py` 1).
+
+### Limites (voir ADR-013 pour le détail)
+
+- Voile tout-ou-rien : pas de **visibilité par couche** (voir la page nettoyée sans texte, par
+  exemple) — exigerait `setVisible` par item et de reboucher le trou que ce mécanisme ouvrirait
+  dans « enregistrer l'image courante ». Jalon ultérieur seulement si demandé.
+- Raccourci clavier configurable non ajouté (coût amont jugé disproportionné pour un 3e
+  déclencheur sans besoin exprimé).
+- Portée strictement page originale vs état courant ; pas de comparaison patch par patch.
+
+### Point de test manuel de Philippe
+
+Page `funhome_012`, traduite et rendue (nettoyage + texte présents).
+
+1. Bouton **Original** (colonne Outils) : la page passe à l'original ; reclic → retour à l'état
+   traduit.
+2. Cliquer dans la page (pour lui donner le focus) puis maintenir **Alt** : la page passe à
+   l'original, le bouton s'enfonce visuellement ; relâcher Alt → retour à l'état traduit.
+3. Placer le curseur dans le champ traduction, maintenir Alt : rien ne se passe. Taper « œ »
+   (Option+O) : aucun clignotement de la page.
+4. Voile actif (bouton ou Alt), lancer **Nettoyer** : l'écran reste à l'original pendant le
+   traitement ; décocher le voile → le nettoyage est bien présent.
+5. Voile actif, `Cmd+E` (enregistrer l'image courante) : le fichier produit contient le texte
+   traduit et le nettoyage, pas l'original. Même vérification en export CBZ et export PSD.
+6. `Cmd+Tab` vers une autre app puis retour : le voile se lève, le bouton se relève.
+7. Changer de page : la nouvelle page s'affiche à l'original si le voile était actif au moment du
+   changement (comportement attendu, à confirmer visuellement).
+8. Passer en mode **webtoon** : le bouton est grisé, Alt n'a plus d'effet.
+
+**Contre-épreuves** :
+- Voile actif via le bouton, puis passage en webtoon : le voile disparaît immédiatement (garde
+  dans `drawForeground`, indépendante du bouton).
+- Fenêtre modale ouverte (dialogue de réglages, par exemple) pendant qu'Alt est maintenu : le
+  voile ne s'arme pas.
+- Alt maintenu, puis clic sur un élément de la scène sous le voile : l'élément réagit normalement
+  (sélection, édition) malgré son invisibilité apparente.

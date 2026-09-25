@@ -74,6 +74,9 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   passe, jamais de `setattr` direct ; `prune` seulement depuis `flush_pending`, fil GUI),
   `commands.py` (`RestoreVersionCommand`), `ui.py` (bouton/menu, seul fichier du paquet à importer
   PySide6, depuis `workspace.py` uniquement). Détail : ADR-012.
+- `modules/view/original.py` — voile « voir l'original » (spec 03 jalon B) : `OriginalViewImageViewer`
+  peint la photo d'origine dans `drawForeground` (vue), jamais dans la scène ; bouton + touche Alt
+  maintenue. Importé uniquement depuis `window.py` et `workspace.py`. Détail : ADR-013.
 
 ## Traduction locale (Ollama)
 
@@ -88,6 +91,15 @@ timeout 180 s (10–1800).
 `Edit`/`Write`) via `force-exclude = true` + `extend-exclude` explicite (ADR-008). **Ne jamais
 retirer `force-exclude`** ; ajouter tout nouveau dossier amont touché par `# fork:` à
 `extend-exclude` avant la première édition. `modules/cleaning/` et `tools/` restent lintés.
+
+## Règle « voir l'original »
+
+Aucun voile ni masquage ne doit vivre dans la scène (`QGraphicsScene`/items) : tout ce qui lit la
+scène (export image/CBZ/PDF/PSD, « enregistrer l'image courante », OCR, détection, traduction,
+nettoyage) doit rester insensible à l'affichage. Le voile « voir l'original » (`modules/view/
+original.py`) est peint uniquement par la vue (`drawForeground`), jamais par une modification
+d'item ou de `visible`. Ne pas réintroduire de mécanisme `setVisible` par item pour une future
+visibilité par couche sans revoir « enregistrer l'image courante » (ADR-013).
 
 ## Interdits
 

@@ -35,6 +35,7 @@ _GUI_ONLY_FILES = {
     "test_manual_mask_equivalence.py",
     "test_history_restore.py",
     "test_legacy_ctpr_compat.py",  # fork: historique par bloc (jalon A) — vérification tester
+    "test_original_view.py",  # fork: voir l'original (spec 03 jalon B)
 }
 
 

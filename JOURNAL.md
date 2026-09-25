@@ -1,5 +1,45 @@
 # JOURNAL
 
+## 2026-09-19 — Spec 03 jalon B : voir l'original
+
+- Chaîne complète : architect → critic pass 1 (« Architect must revise » : Alt/Option est une
+  touche de composition sur clavier Mac français — conflit avec la saisie, ex. Alt+O → œ ; voile
+  « collé » si un relâchement d'Alt est manqué par l'app ; clics avalés par le mécanisme envisagé)
+  → conception v2 → critic pass 2 (« Acceptable to proceed », 2 consignes bloquantes : ne jamais
+  peindre le voile sans photo ni en webtoon quel que soit l'état du bouton, resynchroniser Alt sur
+  l'état réel du clavier) → implementer. Détail : ADR-013 (`specs/decisions.md`),
+  `specs/03-historique-et-calques.md` §9.
+- Mécanisme retenu : `modules/view/original.py`, `OriginalViewImageViewer(ImageViewer)` peint le
+  voile (fond opaque puis photo d'origine) dans `drawForeground` — vue, jamais scène. Mesuré :
+  `scene.render()` (export image/CBZ/PDF/PSD, « enregistrer l'image courante » Cmd+E) ignore le
+  voile par construction ; OCR/détection/traduction/nettoyage insensibles ; aucune levée
+  temporaire nulle part. Deux déclencheurs : bouton **Original** (checkable, colonne Outils) et
+  touche **Alt/Option** maintenue, armée seulement si espace de travail actif, aucune fenêtre
+  modale, fenêtre principale active, aucune saisie en cours (champ éditable focalisé ou bulle en
+  édition), et pas en mode webtoon ; désarmée sur relâchement, désactivation de fenêtre,
+  changement d'état applicatif, et resynchronisée sur l'état réel du clavier au premier événement
+  suivant. Aucun clic avalé (éléments restent cliquables sous le voile). Rien n'est persisté
+  (`.ctpr`, QSettings). 5 lignes `# fork:` (`window.py` 2, `workspace.py` 2, `tests/conftest.py`
+  1). Raccourci clavier configurable coupé (coût amont disproportionné pour un 3e déclencheur).
+- Alternatives rejetées (détail ADR-013) : `setVisible` par item (casse « enregistrer l'image
+  courante », hooks sur chaque création d'item, undo/redo, webtoon) ; vue de comparaison séparée
+  (~400 lignes estimées) ; widget de recouvrement enfant du viewport (pas de signal de
+  transformation fiable sur `QGraphicsView`) ; Espace comme déclencheur (tape dans les champs,
+  déclenche les boutons focalisés).
+- Portée : ferme le critère §6.2 de la spec 03. Laisse ouverte la visibilité par couche (voir la
+  page nettoyée sans texte, par exemple) — impossible avec un voile tout-ou-rien, jalon ultérieur
+  seulement si demandé.
+- Tests : `tests/test_original_view.py`, 22 tests `--gui` offscreen (export et `save_state`
+  identiques octet pour octet avec/sans voile, bouton/touche/auto-repeat/relâchement, changement
+  de page, rendu et nettoyage pendant le voile + undo/redo, aucune clé nouvelle dans l'état,
+  webtoon et absence d'image → rien peint, désarmement sur désactivation/modale, resynchronisation
+  clavier, `save_current_image` bout en bout identique, Alt inhibé en saisie y compris « œ »).
+  Suite complète : 213 tests hors GUI inchangés, 245 avec `--gui` + l'échec amont connu de
+  `test_app.py`. Limite de test documentée : sous le pilote offscreen, le viewport de la fenêtre
+  sans bordure reste à 100×30 px — les tests de pixels utilisent une vue autonome.
+- Reste à faire : **test manuel de Philippe** sur `funhome_012` (protocole décrit dans la spec 03
+  §9), commit de ce lot.
+
 ## 2026-09-16 — Spec 03 jalon A : versions par bloc
 
 - Chaîne complète : architect → critic pass 1 (« Architect must revise », 5 bloquants B1-B5) →

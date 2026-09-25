@@ -19,6 +19,7 @@ from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from modules.history.ui import attach_block_history_button  # fork: historique par bloc (jalon A)
+from modules.view.original import attach_original_button  # fork: voir l'original (spec 03 jalon B)
 
 
 class WorkspaceMixin:
@@ -278,6 +279,7 @@ class WorkspaceMixin:
         misc_lay.addWidget(self.pan_button)
         misc_lay.addWidget(self.set_all_button)
         misc_lay.addStretch()
+        self.original_view_button = attach_original_button(self, misc_lay)  # fork: voir l'original (spec 03 jalon B)
 
         box_tools_lay = QtWidgets.QHBoxLayout()
 

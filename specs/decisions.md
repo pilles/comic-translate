@@ -476,3 +476,96 @@ un worker et depuis les tests hors `--gui`) :
 **Conséquences générales** : toute nouvelle écriture de `blk.text`/`blk.translation` sur un bloc
 vivant doit passer par `modules.history.versions.set_text` (ou `snapshot`/`record_diff` pour un
 processeur qui écrit le champ lui-même) — règle ajoutée à `CLAUDE.md`.
+
+## ADR-013 — Voir l'original : voile peint par la vue, jamais par la scène
+
+Date : 2026-09-19
+Statut : Adoptée (jalon B de la spec 03, test manuel de Philippe en attente)
+
+**Contexte** : `specs/03-inventaire.md` §4 constate qu'aucune couche n'est masquable dans le
+viewer (E1, « absent ») — impossible de voir la page d'origine sans quitter l'app. Chaîne de
+conception : architect → critic pass 1 (« Architect must revise ») → conception v2 → critic
+pass 2 (« Acceptable to proceed », 2 consignes bloquantes) → implementer.
+
+**Bloquants du critic pass 1** : conception v1 basée sur une touche de composition du clavier Mac
+français comme déclencheur (Alt/Option produit des accents, ex. Alt+O → œ) — conflit direct avec
+la saisie de texte ; voile « collé » en cas de relâchement d'Alt manqué par l'app (perte de focus,
+feuille native) ; clics avalés par le mécanisme envisagé. Retenu en v2, en plus du bouton : Alt
+reste le déclencheur (cohérent avec l'usage courant « touche maintenue pour comparer ») mais
+désarmé de façon défensive (désactivation de fenêtre, changement d'état applicatif, resynchronisé
+sur l'état réel du clavier au prochain événement) et inhibé pendant toute saisie de texte.
+
+**Consignes bloquantes du critic pass 2, appliquées** :
+1. Ne jamais peindre le voile sans photo chargée ni en mode webtoon, quel que soit l'état du
+   bouton (`self.webtoon_mode or self.photo.pixmap().isNull()` revérifié à chaque
+   `drawForeground`, jamais une seule fois à l'armement).
+2. Resynchroniser Alt sur l'état réel du clavier (`QGuiApplication.queryKeyboardModifiers()`) à
+   chaque `KeyPress`/`KeyRelease`/`MouseButtonPress` suivant, pour rattraper un relâchement manqué
+   par l'app.
+
+**Décision** — `modules/view/original.py` (nouveau paquet, importe PySide6, seul point d'import
+dans `app/ui/main_window/window.py` et `app/ui/main_window/builders/workspace.py`) :
+- `OriginalViewImageViewer(ImageViewer)` peint le voile dans `drawForeground` — fond opaque
+  (`backgroundBrush()`) puis la photo d'origine (`self.photo`, jamais copiée ni mise en cache) par-
+  dessus tous les items de la scène, revue à chaque repaint. **Rien n'est modifié dans la scène** :
+  `scene.render()` (export image/CBZ/PDF/PSD, « enregistrer l'image courante » Cmd+E) ignore ce
+  voile par construction — mesuré, aucune levée temporaire nulle part dans le code.
+- Deux déclencheurs indépendants, combinés par `_veil_active()` : bouton **Original** (checkable,
+  colonne Outils à côté de Pan, hors outils exclusifs) et touche **Alt/Option** maintenue, armée
+  seulement si :
+
+  | Condition | Vérifiée par |
+  |---|---|
+  | Espace de travail actif | `_workspace_is_active` (recopié de `ShortcutController`) |
+  | Aucune fenêtre modale | `QApplication.activeModalWidget() is None` |
+  | Fenêtre principale active | `main.isActiveWindow()` |
+  | Aucune saisie en cours | `_is_text_input_focused` (champ éditable focalisé) et `_any_text_item_editing` (bulle en édition sur le canevas) |
+  | Pas en mode webtoon | `viewer.webtoon_mode` |
+
+  Désarmée sur relâchement d'Alt, désactivation de fenêtre, changement d'état applicatif, et
+  resynchronisée sur l'état réel du clavier au premier événement suivant (consigne bloquante 2).
+  Le bouton s'enfonce visuellement pendant Alt (`setDown`).
+- Aucun clic n'est avalé : le filtre d'événements retourne toujours `False`, les éléments de la
+  scène restent cliquables bien qu'invisibles sous le voile (dit dans l'infobulle du bouton).
+- Webtoon : voile jamais peint (garde dans `drawForeground`, indépendante de l'état du bouton),
+  bouton grisé au changement de mode (cosmétique — la garde qui fait foi est dans
+  `drawForeground`, jamais le seul signal `toggled`, étouffé par `blockSignals` pendant la bascule
+  webtoon).
+- Rien n'est persisté (`.ctpr`, QSettings) — état de vue pure, recréé vide à chaque lancement.
+- 5 lignes `# fork:` (`window.py` 2, `workspace.py` 2, `tests/conftest.py` 1). Raccourci clavier
+  configurable envisagé puis coupé : aurait coûté ~5 lignes amont supplémentaires pour un 3e
+  déclencheur, sans besoin exprimé.
+
+**Alternatives rejetées** :
+- **`setVisible` par item** (masquer/révéler chaque item de patch/texte/tracé) : rejetée — casse
+  « enregistrer l'image courante » (qui rend la scène telle quelle, `setVisible` y serait visible),
+  exige des hooks sur chaque site de création d'item, complique undo/redo (état de visibilité à
+  restaurer) et n'est pas couvert en webtoon (chunks recréés dynamiquement).
+- **Vue de comparaison séparée** (deuxième `QGraphicsView` synchronisée) : rejetée, ~400 lignes
+  estimées pour la synchronisation (zoom, pan, sélection) sans bénéfice sur le besoin exprimé
+  (comparer d'un geste, pas côte à côte en continu).
+- **Widget de recouvrement enfant du viewport** (blit direct du viewport plutôt que peinture dans
+  `drawForeground`) : rejetée — pas de signal de transformation fiable sur `QGraphicsView` pour
+  resynchroniser la position/le zoom du recouvrement à chaque frame.
+- **Espace comme déclencheur** (plutôt qu'Alt) : rejetée — Espace déclenche les boutons focalisés
+  et tape un caractère dans les champs, pire que le conflit Alt/composition qu'il visait à éviter.
+
+**Conséquences assumées** :
+- Ferme le critère §6.2 de la spec 03 (« masquer le texte traduit d'un clic et voir l'original »).
+- Laisse ouverte la **visibilité par couche** (voir la page nettoyée sans texte, par exemple) :
+  impossible avec un voile tout-ou-rien — exigerait le mécanisme `setVisible` par item écarté
+  ci-dessus, et de reboucher le trou qu'il ouvre dans « enregistrer l'image courante ». Jalon
+  ultérieur, seulement si demandé par Philippe.
+- Portée strictement page originale vs état courant ; pas de comparaison patch par patch ni de
+  calque de nettoyage isolé.
+
+**Tests** : `tests/test_original_view.py`, 22 tests `--gui` offscreen — export et `save_state`
+identiques octet pour octet avec/sans voile (`viewport().grab()` diffère, lui), bouton/touche/
+auto-repeat/relâchement, changement de page avec contenu vérifié, rendu et nettoyage pendant le
+voile + undo/redo, aucune clé nouvelle dans l'état sauvegardé, webtoon et absence d'image → rien
+peint, désarmement sur désactivation de fenêtre/modale, resynchronisation sur l'état clavier réel,
+`save_current_image` bout en bout identique, Alt inhibé en saisie (y compris caractère composé
+« œ »). Suite complète : 213 tests hors GUI inchangés, 245 avec `--gui` + l'échec amont connu de
+`test_app.py`. Limite de test documentée : sous le pilote offscreen, le viewport de la fenêtre
+sans bordure reste à 100×30 px — les tests qui comparent des pixels utilisent une vue autonome,
+pas la fenêtre principale.

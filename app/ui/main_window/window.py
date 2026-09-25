@@ -5,7 +5,7 @@ if sys.platform == "win32":
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app.ui.canvas.image_viewer import ImageViewer
+from modules.view.original import OriginalViewImageViewer  # fork: voir l'original (spec 03 jalon B)
 from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.theme import MTheme
@@ -82,7 +82,7 @@ class ComicTranslateUI(
         h = int(height / 1.2)
         self.setGeometry(x, y, w, h)
 
-        self.image_viewer = ImageViewer(self)
+        self.image_viewer = OriginalViewImageViewer(self)  # fork: voir l'original (spec 03 jalon B)
         self.settings_page = SettingsPage(self)
         self.settings_page.theme_changed.connect(self.apply_theme)
         self.settings_page.font_imported.connect(self.set_font)
