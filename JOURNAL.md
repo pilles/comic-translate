@@ -1,5 +1,71 @@
 # JOURNAL
 
+## 2026-09-25 — Spec 04 jalon 1 : test manuel validé
+
+- Premier test réel : pastilles présentes mais **invisibles sur thème sombre** (case éteinte =
+  trait 1 px `palette.mid` à 35 % d'opacité, écart mesuré de 5 niveaux sur 255 sur la capture) et
+  5e case en partie sous la barre de défilement superposée de macOS. Corrigé dans
+  `modules/pagestate/ui.py` seul, sans ligne amont : case éteinte = même rectangle qu'une case
+  pleine, couleur du texte à alpha 60 ; piste arrêtée avant la barre de défilement
+  (`_scrollbar_left`). Tests inchangés : 240 passed hors GUI, 287 passed `--gui` (+ échec amont
+  connu `test_app.py`).
+- Traduction en échec « No route to host » pendant le test : **réglage « Réseau local » de macOS
+  bloqué sur l'Air**, pas un défaut de code. Tout binaire non signé Apple (Python système et `uv`,
+  Node) refusé vers tout le LAN, box comprise, Internet OK, `curl` OK ; identique depuis iTerm et
+  Terminal.app, iTerm autorisé, filtre Little Snitch désactivé, Wi-Fi du Mini coupé (le Mini est
+  désormais en Ethernet seul, 192.168.1.101). Résolu par redémarrage de l'Air. Note de `CLAUDE.md`
+  corrigée (elle accusait Little Snitch à tort).
+- Test manuel de Philippe : **pastilles fonctionnelles**.
+- Reste à faire : commit du jalon B de la spec 03 puis du jalon 1 de la spec 04 ; décision sur le
+  mode webtoon avant le jalon 2.
+
+## 2026-09-22 — Spec 04 jalon 1 : état d'avancement par page
+
+- Brief et spec 04 rédigés le 2026-09-21 (`specs/brief-refonte-interface.md`,
+  `specs/04-refonte-interface.md`), à partir de la maquette « Atelier de traduction BD ». Décisions
+  de Philippe sur les 5 questions ouvertes : sélection de pages plutôt qu'un mode Page/Album ;
+  rendu final affiché par défaut à l'ouverture d'une page traitée ; nouvelle fenêtre principale
+  plutôt qu'un réagencement de l'existante ; mode revue dédié conservé (jalon tardif) ; le lot est
+  le point 1 du travail. Découverte au passage : le lot sur sélection de pages existe déjà (clic
+  droit dans la liste, `controller.py:596`, rapport de lot, reprise des pages sautées) mais n'est
+  annoncé nulle part dans l'interface ; les boutons radio Manuel/Automatique grisent la moitié des
+  commandes selon un réglage que rien n'explique (§3 de la spec, à supprimer au jalon 2).
+- Chaîne de conception du jalon 1 : architect → critic pass 1 (« Architect must revise », 1
+  bloquant M1 + 3 majeurs) → arbitrage de Philippe (option A, déduction pure sans persistance) →
+  conception v2 → critic pass 2 (« Acceptable to proceed », 7 mineurs) → implementer → tester (OK)
+  → security-reviewer non déclenché (module `modules/pagestate/` lecture seule, aucun
+  réseau/fichier/sous-processus) → doc-writer. Détail : ADR-014 (`specs/decisions.md`),
+  `specs/04-refonte-interface.md` §5 jalon 1.
+- Décision : deux statuts par étape (FAITE / ABSENTE), recalculés à l'affichage, **aucune donnée
+  persistée, aucun point d'écriture** dans les chemins manuel/lot/cache/undo. Format `.ctpr`
+  inchangé dans les deux sens. Option B (drapeau persisté « étape lancée », 3e statut VIDE) rejetée
+  après revue du critic : mentait après une ré-détection, s'affichait VIDE pendant l'opération,
+  divergeait selon le chemin (page seule / multi-pages / lot), pouvait viser la mauvaise page en
+  cas de navigation pendant le traitement. Le signal « lancée sans résultat » est reporté au
+  jalon 3 (message à la complétion d'une étape).
+- Construit : `modules/pagestate/{__init__,progress,collect,ui}.py` (nouveau paquet — `progress.py`
+  et `collect.py` purs, `ui.py` seul fichier à importer PySide6, délégué par composition autour du
+  délégué amont de la liste de pages) ; `controller.py` 2 lignes `# fork:` (attache en fin de
+  `ComicTranslate.__init__`, pas dans `workspace.py` qui s'exécute trop tôt — bloquant M1 du critic
+  pass 1) ; `tests/conftest.py` 1 ligne `# fork:`. 3 lignes amont, 2 fichiers touchés, zéro ligne
+  dans `list_view.py`, `image.py`, `manual_workflow.py`, `text.py`, `pipeline/*`, `app/projects/*`.
+- Mesures et tests : `tests/test_pagestate.py` (27, hors GUI), `tests/test_pagestate_ui.py` (15,
+  `--gui`). `uv run pytest -q` → **240 passed** ; `--gui` → **287 passed, 3 skipped**, 1 failed
+  (`test_app.py`, échec amont connu). Ruff OK. Chien de garde (rattrape les écritures non
+  signalées) : coût médian 0,53 ms/tick mesuré sur 242 pages × 30 blocs. Non-écriture prouvée (pas
+  seulement affirmée) : octets SHA-256 d'un `.ctpr` réel identiques avant/après une rafale de
+  peintures, ticks et rafraîchissements.
+- Défauts amont découverts en cours de conception, non corrigés (détail ADR-014, candidats PR
+  amont spec 00 §5) : (1) navigation pendant un lot écrit les blocs d'une page dans `image_states`
+  d'une autre à la navigation suivante (`batch_processor.py:97`/`:450-451`) ; (2) même défaut hors
+  lot sur les opérations multi-pages (`context["current_file"]` périmé) ; (3) `_batch_active` peut
+  rester bloqué à `True` si un lot en file derrière un autosave est annulé avant de démarrer ;
+  (4) page insérée puis traitée par lot → `KeyError` au chargement suivant (`viewer_state`
+  incomplet), touchera le jalon 4.
+- Reste à faire : **test manuel de Philippe** sur le jalon 1 (protocole dans la spec 04 §5, encadré
+  « Livré le 2026-09-22 »), commit du jalon 1, commit du jalon B de la spec 03 (toujours non
+  commité, pas encore testé à la main), démarrage du jalon 2.
+
 ## 2026-09-19 — Spec 03 jalon B : voir l'original
 
 - Chaîne complète : architect → critic pass 1 (« Architect must revise » : Alt/Option est une

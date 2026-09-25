@@ -77,6 +77,10 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
 - `modules/view/original.py` — voile « voir l'original » (spec 03 jalon B) : `OriginalViewImageViewer`
   peint la photo d'origine dans `drawForeground` (vue), jamais dans la scène ; bouton + touche Alt
   maintenue. Importé uniquement depuis `window.py` et `workspace.py`. Détail : ADR-013.
+- `modules/pagestate/` — état d'avancement par page (spec 04 jalon 1) : `progress.py`/`collect.py`
+  purs (déduction pure sur `blk_list`/`image_states`, **aucune écriture, jamais d'ajout d'écriture
+  dans ce paquet**), `ui.py` (délégué par composition, seul fichier à importer PySide6). Importé
+  uniquement depuis `controller.py`. Détail : ADR-014.
 
 ## Traduction locale (Ollama)
 
@@ -125,8 +129,22 @@ visibilité par couche sans revoir « enregistrer l'image courante » (ADR-013).
   dans le fork (`comic.py`, `locale.setlocale(locale.LC_NUMERIC, "C")` juste après la création de
   `QApplication`, ADR-009). **Règle** : tout script qui crée une `QApplication` avant d'importer
   `onnxruntime` doit remettre `LC_NUMERIC` à `C` juste après.
-- Environnement : Little Snitch peut bloquer `python3.12` de `uv` vers le LAN (« No route to
-  host » alors que `curl` passe, vu 2026-09-14/15, résolu par macOS 27 + redémarrage).
+- Environnement (Air) : « No route to host » (Errno 65) vers le Mini alors que `curl` passe = le
+  réglage « Réseau local » de macOS bloqué dans un mauvais état. Tout binaire non signé Apple
+  (Python système ou `uv`, Node) est refusé vers tout le LAN, box comprise ; Internet passe ; même
+  échec depuis iTerm et Terminal.app, iTerm autorisé, Little Snitch désactivé. Pas un défaut de
+  code. Seul correctif constaté : **redémarrer l'Air** (vu 2026-09-14/15 et 2026-09-23/24). Test :
+  `uv run python -c "import urllib.request;print(urllib.request.urlopen('http://daaminim4.local:11434/api/version',timeout=5).read())"`.
+- Navigation pendant un lot → corruption de page : `batch_processor.py:97` capture la page affichée
+  au début du traitement ; naviguer pendant le lot fait écrire les blocs d'une page dans
+  `image_states` d'une autre à la navigation suivante (ADR-014, non reproduit en réel).
+- Même défaut hors lot sur les opérations multi-pages (Reconnaître/Traduire/Détecter sur sélection,
+  `context["current_file"]` périmé si on navigue pendant l'opération, ADR-014).
+- `_batch_active` peut rester bloqué à `True` si un lot mis en file derrière un autosave est annulé
+  avant de démarrer (`on_batch_process_finished` jamais appelé, ADR-014).
+- Page insérée puis traitée par lot : `viewer.load_state` lève `KeyError` sur `state['rectangles']`
+  au chargement suivant (`viewer_state` incomplet laissé par le lot, ADR-014, touchera le jalon 4
+  de la spec 04).
 
 ## Mémoire projet
 

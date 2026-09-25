@@ -1,0 +1,220 @@
+# Spec 04 — Refonte de l'interface et du parcours
+
+> Suite du brief `specs/brief-refonte-interface.md`. Ce document tranche les questions ouvertes,
+> décrit la cible et découpe le travail en jalons testables un par un.
+> Maquette de référence : « Atelier de traduction BD » (artefact publié le 2026-09-21).
+
+---
+
+## 1. Décisions prises (2026-09-21)
+
+| # | Question | Décision |
+|---|---|---|
+| 1 | Page par page ou album d'abord ? | **Ni l'un ni l'autre : une sélection.** Voir §2, la machinerie existe déjà. |
+| 2 | Que voir en ouvrant une page traitée ? | **Le rendu final.** Les bulles restent cliquables, sans raccourci caché. |
+| 3 | Réagencement ou nouvelle fenêtre ? | **Nouvelle fenêtre principale**, conforme à la maquette. |
+| 4 | Mode revue dédié ? | **Oui**, page suivante / bulle suivante au clavier. Jalon tardif. |
+| 5 | Place du lot ? | C'est le point 1. |
+
+---
+
+## 2. Ce que le code sait déjà faire (mesuré, pas supposé)
+
+Le « lancer un test sur 5 pages » demandé au point 1 **est déjà implémenté** :
+
+- `app/ui/list_view.py:241-247` — clic droit sur une sélection de pages, entrée « traduire ».
+- `controller.py:249` — `page_list.translate_imgs` → `batch_translate_selected`.
+- `controller.py:596-627` — `_run_batch_for_paths` : dédoublonnage, validation des réglages par
+  page, lot restreint à la sélection (`selected_batch`, vide = album entier).
+- `app/controllers/batch_report.py` — rapport de lot : pages sautées, raison localisée, action
+  conseillée, bouton de reprise (`retry_skipped_batch_images`, `controller.py:609`).
+- `controller.py:646-720` — annulation en cours de lot, barre de progression nommant la page
+  courante, purge des modèles après lot, sauvegarde automatique du rapport.
+
+**Conclusion : il n'y a rien à construire pour le point 1, il y a à le montrer.** Aujourd'hui,
+la seule façon de découvrir cette fonction est un clic droit que rien n'annonce.
+
+Autre acquis exploitable : `image_states[chemin]` est un dictionnaire par page déjà persisté dans
+le projet, et `_build_image_state` (`app/controllers/image.py:74`) repart de l'état existant avant
+de le mettre à jour — **les clés inconnues survivent**. Ajouter un état d'avancement par page ne
+casse donc aucun `.ctpr`, dans aucun sens.
+
+---
+
+## 3. Le mode qui existe vraiment, et qu'il faut supprimer
+
+Philippe demandait « savoir dans quel mode on navigue ». Un mode existe bel et bien, et c'est une
+source de confusion :
+
+- `controller.py:177` — deux boutons radio, `manual_radio` / `automatic_radio`.
+- `controller.py:470-478` — « Automatique » **grise les six boutons d'étape** ;
+  « Manuel » **grise « Traduire tout »**.
+
+Autrement dit, la moitié des commandes est éteinte en permanence selon un réglage que rien
+n'explique. **Cible : plus aucun mode.** Les étapes restent toujours disponibles ; le lot est
+simplement « les pages sélectionnées ». L'intuition de Philippe — « c'est peut-être pas tout à fait
+utile » — est la bonne : ce qui manquait n'était pas un indicateur de mode, c'était la disparition
+du mode.
+
+---
+
+## 4. La cible
+
+Une fenêtre, quatre zones, aucune superposition de sujets.
+
+**Barre de titre** — nom du projet, état de sauvegarde en clair (« enregistré il y a 2 min »),
+jamais un simple interrupteur muet.
+
+**Colonne de gauche — les pages.** Vignette, numéro, et une **piste d'avancement en cinq segments**
+(détectée, reconnue, traduite, nettoyée, rendue). Sélection multiple, et un bouton visible
+« Traduire la sélection » sous la liste, qui remplace le clic droit caché. C'est là que se joue le
+test sur 5 pages : on sélectionne 5 pages, on lance, on juge, on continue ou on change les réglages.
+
+**Centre — la page.** Rendu final par défaut (décision 2), bulles cliquables sans raccourci. Le
+bouton « Original » et la touche Alt (jalon B, ADR-013) restent tels quels.
+
+**Barre d'étapes flottante** — les six étapes affichées comme un avancement, avec **une seule
+action principale** (« Continuer ») qui lance l'étape suivante de la page courante. Chaque étape
+reste cliquable individuellement pour reprendre la main.
+
+**Panneau de droite — contextuel.** Bulle sélectionnée → source anglaise étiquetée et jamais vidée,
+traduction, bouton **« Historique »** nommé (plus l'icône ambiguë), police et rendu. Rien de
+sélectionné → réglages de la page. Les outils de dessin et de nettoyage sortent du panneau texte
+pour rejoindre une barre d'outils.
+
+**Retours explicites partout** : « 10 bulles reconnues, 1 sans texte », « aucun bloc détecté sur
+cette page », « modèle indisponible ». Plus jamais de silence après une action.
+
+---
+
+## 5. Jalons
+
+Chaque jalon se termine par un test manuel que Philippe fait lui-même, et un commit.
+
+### Jalon 1 — État d'avancement par page
+
+*But :* savoir où on en est, sur une page comme sur 242. C'est le socle de tout le reste, et il est
+visible immédiatement dans l'interface actuelle.
+
+- Nouveau module `modules/pagestate/` : énumération des cinq étapes, calcul de l'état d'une page à
+  partir de son `image_states` et de son `blk_list` (pas de nouvelle source de vérité).
+- **Déduction pure, aucune écriture** : contrairement à ce que ce paragraphe prévoyait à l'origine
+  (« écriture de l'état au passage de chaque étape », « persistance : clé supplémentaire dans
+  `image_states` »), l'implémentation ne persiste rien — deux statuts par étape (FAITE / ABSENTE),
+  recalculés à l'affichage sur `blk_list` (page vivante) ou `image_states` (autre page). Décision et
+  option B rejetée : ADR-014 (`specs/decisions.md`).
+- Affichage : pastilles (piste de cinq segments) dans la liste de pages existante, par composition
+  autour du délégué amont.
+
+*Critère de réussite :* ouvrir un CBZ, traiter deux pages différemment, fermer, rouvrir le projet —
+les pastilles reflètent exactement ce qui a été fait. Aucun ancien `.ctpr` ne refuse de s'ouvrir.
+
+> **Livré le 2026-09-22.** Fichiers : `modules/pagestate/{__init__,progress,collect,ui}.py`
+> (nouveau paquet), `controller.py` (2 lignes `# fork:`), `tests/conftest.py` (1 ligne `# fork:`).
+> 3 lignes amont, 2 fichiers touchés. Tests : `tests/test_pagestate.py` (27, hors GUI),
+> `tests/test_pagestate_ui.py` (15, `--gui`). `uv run pytest -q` → 240 passed ; `--gui` → 287
+> passed, 3 skipped, 1 failed (`test_app.py`, échec amont connu). Non-écriture prouvée par SHA-256
+> identique d'un `.ctpr` avant/après une rafale de peintures. Détail complet, limites et défauts
+> amont découverts : ADR-014.
+>
+> **Protocole de test manuel (Philippe)** :
+> 1. Ouvrir le CBZ de test, page 11 : Détecter, Reconnaître, Traduire, Segmenter + Nettoyer, Rendre.
+>    Après chaque étape, la pastille correspondante se remplit en moins d'une seconde, sans changer
+>    de page.
+> 2. Page 12 : seulement Détecter et Reconnaître → 2 pastilles pleines, 3 éteintes.
+> 3. Page 11 : Cmd+Z sur le nettoyage → 4e pastille éteinte ; Cmd+Shift+Z → rallumée.
+> 4. Taper du texte dans le champ traduction d'une bulle qui n'en avait pas → « traduite » s'allume ;
+>    tout effacer → elle s'éteint.
+> 5. Sélectionner les pages 13 à 15, clic droit → Translate : les pages passent à 5/5 une à une. **Ne
+>    pas changer de page pendant le lot** (défaut amont n°1, ADR-014).
+> 6. Lancer un lot sur 16 à 20 et l'annuler au milieu : chaque page ouverte montre exactement ce que
+>    ses pastilles annonçaient.
+> 7. Marquer la page 12 « Skip » : nom barré et piste atténuée, lisible.
+> 8. Survoler une page : infobulle « Détectée (N blocs) · Reconnue x/N · … », lisible ; sur une page
+>    jamais traitée, « Pas encore détectée »…
+> 9. Enregistrer, quitter, rouvrir le `.ctpr` : pastilles identiques, pas de clignotement « tout
+>    vide » sur la page affichée, défilement fluide.
+> 10. Ouvrir un `.ctpr` enregistré avant ce jalon : il s'ouvre, pastilles fidèles à son contenu.
+> 11. Thème clair et thème sombre du système : pastilles lisibles dans les deux, y compris sur la
+>     ligne sélectionnée.
+> 12. Une minute sans rien faire : CPU au repos inchangé dans le Moniteur d'activité.
+
+### Jalon 2 — La nouvelle fenêtre
+
+*But :* la coquille de la maquette, sans aucune fonction nouvelle.
+
+- Nouveaux constructeurs d'interface à côté de l'existant, réutilisant **les widgets et les
+  contrôleurs actuels sans les réécrire** (`ImageViewer`, contrôleurs `app/controllers/`).
+  C'est la condition pour que le coût de rebase reste supportable.
+- Panneau de droite contextuel, barre d'outils séparée, champs texte redimensionnables
+  (fin du 120 px en dur, défaut 10 de la table du brief).
+- Suppression des boutons radio Manuel / Automatique (§3).
+
+*Critère de réussite :* tout ce qui marchait marche encore — détection, OCR, traduction, nettoyage,
+rendu, historique par bulle, bouton Original, exports image/CBZ/PDF/PSD, ouverture et sauvegarde de
+projet. Rien de neuf, rien de cassé.
+
+### Jalon 3 — Action unique et retours explicites
+
+*But :* ne plus avoir à connaître l'ordre des étapes, ne plus subir le silence.
+
+- Barre d'étapes alimentée par le jalon 1, bouton « Continuer ».
+- Messages de résultat après chaque étape, avec des nombres.
+- Les échecs silencieux connus deviennent visibles : aucun rectangle avant « Reconnaître »
+  (`pipeline/ocr_handler.py:24`), modèle injoignable, page sans bloc détecté.
+- Reprise du signal « lancée sans résultat » (option B écartée au jalon 1, ADR-014) sous forme de
+  message à la complétion d'une étape, pas d'un troisième statut persisté.
+
+*Critère de réussite :* traiter une page entière sans jamais cliquer ailleurs que sur
+« Continuer » ; provoquer une panne (endpoint Ollama éteint) et lire un message qui dit quoi faire.
+
+### Jalon 4 — Le lot rendu visible
+
+*But :* exposer ce qui existe déjà (§2).
+
+- Bouton « Traduire la sélection » sous la liste de pages, avec le compte
+  (« Traduire les 5 pages sélectionnées »).
+- Progression par page et annulation visibles, rapport de fin lisible avec reprise des pages
+  sautées.
+- Vérification du comportement sur sélection partielle et sur album entier.
+- Traiter le défaut amont n°4 relevé au jalon 1 (ADR-014) : perte du rendu de lot sur une page
+  insérée (`viewer_state = {}`, `KeyError` sur `state['rectangles']` au chargement suivant).
+
+*Critère de réussite :* sélectionner 5 pages, lancer, annuler au milieu, relancer, lire le rapport.
+
+### Jalon 5 — Premier lancement et mode revue
+
+*But :* les frictions de départ et la correction rapide d'un album.
+
+- À l'ouverture d'un CBZ : proposer d'enregistrer le projet, activer la sauvegarde automatique par
+  défaut, demander la langue source une fois (et retenir qu'« English » vaut mieux qu'« Auto »,
+  défaut 10 du brief).
+- Mode revue : page suivante / bulle suivante au clavier, sans quitter le panneau de correction.
+
+*Critère de réussite :* ouvrir un CBZ neuf et arriver à une page traduite sans passer par les
+réglages ; parcourir 10 pages et corriger 3 bulles sans toucher la souris.
+
+---
+
+## 6. Contraintes reprises du brief (non négociables)
+
+1. Fork : toute ligne modifiée dans un fichier amont porte `# fork:` et reste minimale. Le code
+   nouveau va dans des modules nouveaux. **La nouvelle fenêtre doit être un module nouveau qui
+   réutilise l'existant, pas une réécriture des contrôleurs.**
+2. PySide6 / Qt Widgets. Pas de QML, pas de web.
+3. Compatibilité `.ctpr` dans les deux sens, export PSD inchangé, aucun appel réseau hors
+   HuggingFace et l'endpoint Ollama configuré.
+4. Aucun compte, aucune télémétrie.
+5. Un jalon, un test manuel, un commit.
+
+---
+
+## 7. Reste ouvert
+
+- Le mode webtoon est hors périmètre de tous les jalons, comme pour les specs 02 et 03. À trancher
+  avant le jalon 2 : la nouvelle fenêtre doit-elle le proposer, ou le fork l'abandonne-t-il ?
+- L'historique par bulle (jalon A de la spec 03) ne couvre pas le traitement par lot. À décider au
+  jalon 4 : enregistre-t-on une version par bulle pendant un lot de 242 pages, ou seulement en
+  manuel ?
+- Le nombre de pages par défaut d'un « lot d'essai » (5 ? 10 ?) n'a pas besoin d'être codé : c'est
+  une sélection libre dans la liste.

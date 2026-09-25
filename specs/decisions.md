@@ -569,3 +569,115 @@ peint, désarmement sur désactivation de fenêtre/modale, resynchronisation sur
 `test_app.py`. Limite de test documentée : sous le pilote offscreen, le viewport de la fenêtre
 sans bordure reste à 100×30 px — les tests qui comparent des pixels utilisent une vue autonome,
 pas la fenêtre principale.
+
+## ADR-014 — État d'avancement par page : déduction pure, aucune persistance
+
+Date : 2026-09-22
+Statut : Adoptée (jalon 1 de la spec 04, test manuel de Philippe en attente)
+
+**Contexte** : `specs/04-refonte-interface.md` §5 jalon 1 demandait initialement « écriture de
+l'état au passage de chaque étape » et « persistance : clé supplémentaire dans `image_states` ».
+Chaîne de conception : architect → critic pass 1 (« Architect must revise », 1 bloquant M1, 3
+majeurs) → arbitrage de Philippe (option A) → conception v2 → critic pass 2 (« Acceptable to
+proceed », 7 mineurs) → implementer → tester (OK) ; security-reviewer non déclenché (module lecture
+seule, aucun réseau/fichier/sous-processus).
+
+**Options considérées** :
+- **A (retenue)** : déduction pure à l'affichage, deux statuts par étape — FAITE (compteur > 0) /
+  ABSENTE — jamais rien écrit ni persisté. Format `.ctpr` inchangé dans les deux sens.
+- **B (rejetée après revue du critic)** : un drapeau persisté « étape lancée » (troisième statut
+  VIDE) pour distinguer « jamais lancée » de « lancée sans résultat ». Rejetée : le drapeau mentait
+  après une ré-détection (drapeaux OCR/traduction jamais invalidés alors que les blocs sont neufs),
+  s'affichait VIDE pendant l'opération elle-même, divergeait entre page seule / multi-pages / lot
+  selon le chemin d'écriture, et pouvait viser la mauvaise page si l'utilisateur navigue pendant le
+  traitement (voir défauts amont n°1 et n°2 ci-dessous). Coût ~22 lignes amont pour une garantie
+  qui ne tenait pas. Le signal « lancée sans résultat » est reporté au jalon 3 de la spec 04, sous
+  forme de message à la complétion d'une étape plutôt que d'un état persisté.
+
+**Décision** — `modules/pagestate/` (nouveau paquet) :
+- `progress.py` (pur) : `STEPS = ("detect", "ocr", "translate", "clean", "render")`, dataclass
+  figée `PageProgress` + `done(step)`, `compute_progress`.
+- `collect.py` (pur, duck typing, aucun import PySide6) : `live_path(main)` — renvoie le chemin de
+  la page vivante, ou `None` si webtoon, si `_batch_active`, si `curr_img_idx` hors
+  `[0, len(image_files))`, ou si `image_data[page]` est `None` (page pas encore chargée — évite le
+  clignotement « tout vide » à l'ouverture d'un projet) ; `page_progress(main, path)` — lit la page
+  courante sur le **vivant** (`main.blk_list`, `main.image_patches`, `main.image_viewer`) si
+  `live_path(main) == path`, sinon dans `image_states[path]`.
+- `ui.py` (seul fichier du paquet à importer PySide6) : `PageStateDelegate`, enveloppe par
+  **composition** autour du délégué amont de la liste de pages (`page_list.itemDelegate()`, jamais
+  d'héritage de `PageListItemDelegate`) — peint une piste de cinq segments par-dessus, `sizeHint`
+  délégué (liste à `setUniformItemSizes(True)`). `_Refresher` étranglé à 30 ms sur signaux
+  (`undo_group.indexChanged`, `render_state_ready`, `patches_processed`, `image_skipped`,
+  `progress_update`, `s_text_edit`/`t_text_edit.textChanged`) + chien de garde à 500 ms sur la
+  signature des lignes visibles (couvre les écritures non signalées : OCR/traduction manuels,
+  écritures multi-pages directes, Segmenter, fin de lot). `attach_page_state(main)` entièrement
+  sous `try/except` : l'app démarre sans pastilles si l'attache échoue.
+- **Définitions des cinq compteurs** : detect = nb blocs ; ocr / translate = nb blocs avec
+  `text` / `translation` non vide après strip ; clean = `len(main.image_patches.get(path, []))`
+  (source unique, jamais de lecture de `png_path`) ; render = `text_items_state` pour une page lue
+  dans `image_states`, items de `image_viewer.text_items` présents dans la scène pour la page
+  vivante (compte exactement ce que `save_state` persiste).
+- **Attache en fin de `ComicTranslate.__init__`**, pas dans `workspace.py` : `workspace.py`
+  s'exécute pendant `super().__init__`, avant la création de `undo_group`, `image_states`,
+  `blk_list`, `image_patches` — plantage au démarrage constaté en revue (bloquant M1 du critic
+  pass 1).
+- Amont touché : `controller.py` (2 lignes `# fork:`, import + `attach_page_state(self)` juste
+  après `self.connect_ui_elements()`), `tests/conftest.py` (1 ligne `# fork:`,
+  `test_pagestate_ui.py` ajouté à `_GUI_ONLY_FILES`). **3 lignes, 2 fichiers.** Zéro ligne dans
+  `list_view.py`, `image.py`, `manual_workflow.py`, `text.py`, `pipeline/*`, `app/projects/*`.
+
+**Constat de conception corrigé en cours de route** : l'affirmation initiale selon laquelle les
+`TextBlock` seraient partagés (aliasing superficiel) entre `main.blk_list` et
+`image_states[courante]['blk_list']` était **fausse** — copies constatées en `box.py:274`,
+`:298-299`, copies profondes `manual_workflow.py:112`/`:195`, `block_detection.py:63`. D'où la
+règle de source (`live_path`) plutôt qu'une lecture uniforme de `image_states`.
+
+**Tests** : `tests/test_pagestate.py` (27 tests hors GUI), `tests/test_pagestate_ui.py` (15 tests
+`--gui`). `uv run pytest -q` → 240 passed ; `--gui` → 287 passed, 3 skipped, 1 failed
+(`tests/test_app.py`, échec amont connu). Ruff OK. Coût du tick du chien de garde : médiane
+0,53 ms mesurée sur 242 pages × 30 blocs (~60 lignes visibles). Test clé de non-écriture : octets
+d'un `.ctpr` réel (`save_state_to_proj_file_v2`) identiques SHA-256 avant/après une rafale de
+peintures, ticks et rafraîchissements — lecture seule prouvée, pas seulement affirmée.
+
+**Conséquences et limites assumées (à ne pas « corriger par surprise »)** :
+- Pastilles indépendantes, pas une barre de progression monotone : un lot annulé peut laisser une
+  page « nettoyée » seule sans blocs (patchs posés `batch_processor.py:327` avant `blk_list`
+  `:441`) — c'est la vérité des données, pas un bug d'affichage.
+- Pendant un lot, la page courante est lue dans `image_states` (`live_path` renvoie `None` si
+  `_batch_active`) : du travail non enregistré sur cette page fait reculer ses pastilles jusqu'à la
+  fin du lot.
+- Branche lot « aucun bloc détecté » (`batch_processor.py:191-195`) : n'écrit pas `blk_list`, les
+  anciens blocs restent affichés FAITE.
+- Lot en échec OCR/traducteur : état de la page inchangé, la raison est dans le rapport de lot
+  (§2 de la spec 04).
+- Import PSD : seule « rendue » s'allume (`blk_list` vide après import).
+- Webtoon : lecture `image_states` seulement, peut être en retard — hors périmètre (comme pour les
+  specs 02 et 03).
+
+**Défauts amont découverts en cours de conception, non corrigés (candidats PR amont, spec 00 §5)** :
+1. **Navigation pendant un lot → corruption de page** : `batch_processor.py:97` capture
+   `file_on_display` au début du traitement d'une page ; si l'utilisateur navigue, `:450-451` fait
+   `main.blk_list = blocs de A` alors que B est affichée ; la navigation suivante
+   (`save_image_state(B)`, `image.py:1021-1031`) écrit les blocs de A dans `image_states[B]`. Non
+   reproduit en réel, déduit du code et confirmé par deux revues.
+2. **Même défaut hors lot** : opérations multi-pages (Reconnaître/Traduire/Détecter sur une
+   sélection) avec `context["current_file"]` périmé si l'on navigue pendant l'opération
+   (`manual_workflow.py:185-196`, `:282-286`, `:392-396` ; `text.py:904-913`).
+3. **`_batch_active` peut rester bloqué à `True`** : lot mis en file derrière un autosave
+   (`projects.py:431`, `controller.py:649`/`:673`), clic Annuler qui vide la file
+   (`task_runner.py:155`) avant démarrage → `on_batch_process_finished` jamais appelé ; bouton
+   Traduire grisé et barre de progression affichée jusqu'à la fermeture de l'app.
+4. **Perte du rendu de lot sur page insérée** : page insérée avec `viewer_state = {}`
+   (`image.py:452-458`), le lot n'y ajoute que `text_items_state` et `push_to_stack`
+   (`batch_processor.py:428-434`), `viewer.load_state` lève `KeyError` sur `state['rectangles']`
+   (`image_viewer.py:546`) après avoir vidé la scène, et la navigation suivante persiste
+   `text_items_state = []`. Touchera le jalon 4 de la spec 04 (lot rendu visible).
+
+**Alternatives rejetées** :
+- **Propriété calculée mise en cache par page** (recalcul à la demande, invalidée par signal) :
+  rejetée à ce stade — la mesure (0,53 ms/tick) ne justifiait pas la complexité d'un cache invalidé
+  correctement sur tous les chemins d'écriture identifiés.
+- **Instrumenter `on_manual_finished`** (1 ligne amont pour rendre l'OCR/la traduction manuels
+  instantanés au lieu d'attendre le chien de garde à 500 ms) : écartée, 1 ligne amont pour gagner
+  0,5 s de latence perçue — à réintroduire seulement si Philippe trouve la latence gênante à
+  l'usage.
