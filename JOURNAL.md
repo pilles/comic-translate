@@ -1,5 +1,55 @@
 # JOURNAL
 
+## 2026-09-27 — Spec 04 jalon 2 (2a) : nouvelle disposition, hotfix analyse sur l'original
+
+- **Nouvelle disposition (2a)** : `modules/shell/` (nouveau paquet) reparente les mêmes objets
+  construits par `_create_main_content` (jamais recréés, ~400 lectures de widgets par nom dans les
+  contrôleurs) dans une disposition à 3 colonnes conforme à la maquette « Atelier de traduction BD »
+  (`specs/maquette-atelier.html`, désormais versionnée) : pages + recherche à gauche, page + badge
+  Original en surimpression au centre, panneau droit (Source/Traduction, Historique, Rendu du
+  texte, Outils en bas) à droite. Chaîne : architect (options A reparentage/B recréation/C docks) →
+  critic pass 1 (« Architect must revise », bloquant sur le bouton Original dans l'en-tête, majeurs
+  sur le focus/Cancel/repli/webtoon) → décisions de Philippe (outils en bas, aucun `.ctpr` webtoon)
+  → conception v2 → critic pass 2 (« Acceptable to proceed », conditions sur le focus, l'index de
+  déplacement, le badge, la fixture) → implementer → tester (OK, régression de hauteur mesurée et
+  corrigée) → correctif implementer → test manuel de Philippe en attente. Détail : ADR-015
+  (`specs/decisions.md`), `specs/04-refonte-interface.md` §5 jalon 2.
+- Tout-ou-rien avec retour arrière exact et **repli visible** en cas d'erreur (bandeau, jamais un
+  échec silencieux) ; interrupteur **`COMIC_SHELL=0`** pour relancer dans l'ancienne disposition
+  (a servi le jour même pour départager le hotfix ci-dessous). Amont touché : `window.py` (2 lignes
+  `# fork:`), `tests/conftest.py` (1 ligne) — zéro ligne dans `workspace.py`/`nav.py`/
+  `controller.py`/les contrôleurs/`pipeline/`.
+- Mesures (offscreen) : champs texte 136/135 px à 1225×797 (contre 120 px fixes avant), 84/83 px à
+  1066×693 (« Texte plus grand », sous les 120 px d'avant — la sous-étape 2c retirera les listes de
+  langue de la section Bulle). Tests : `tests/test_shell.py` (7, hors GUI), `tests/test_shell_ui.py`
+  (30, `--gui`) — garde de couverture sur les descendants interactifs de l'ancien contenu parqué,
+  repli simulé par injection d'erreur à 4 points, badge hors scène/viewport, identité des widgets.
+- Reste à faire du jalon 2 : **2b** (radios/interrupteur webtoon parqués cachés, Cancel grisé au
+  repos), **2b-bis** (correctif `task_runner.py` pour le défaut amont n°3 de l'ADR-014, **décision
+  de Philippe en attente**), **2c** (pile Page/Bulle, règle de focus). « Source jamais vidée »
+  (annotation 4 de la maquette) : reporté.
+- **Hotfix — analyse du texte sur l'image d'origine** : test manuel de Philippe sur la 2a, symptôme
+  « plus rien ne fonctionne » après quelques cycles Détecter/Reconnaître/Traduire/Segmenter/
+  Nettoyer/Rendre (boutons cliquables sans effet, aucune erreur au journal). Départagé de la
+  nouvelle disposition par `COMIC_SHELL=0` : défaut préexistant à l'amont. Diagnostic : « Détecter »
+  sur une page déjà nettoyée analysait `get_image_array()` **avec** les patchs de nettoyage — le
+  texte anglais n'est plus dans l'image, la détection trouve 0 bloc et **remplace les blocs
+  existants par zéro** ; « Reconnaître » n'a alors plus de rectangle (garde silencieuse déjà
+  connue) et « Rendre » avec 0 bloc efface les textes rendus. Récupération : Cmd+Z.
+- Correctif : `get_image_array(include_patches=False)` aux 5 appels qui analysent le texte de la
+  page courante — `pipeline/block_detection.py`, `pipeline/ocr_handler.py` (+ clé de cache OCR
+  stable après nettoyage), `pipeline/translation_handler.py` (image de contexte + clé de cache),
+  `app/controllers/manual_workflow.py` ×2 (segmentation). 5 lignes `# fork:` dans 4 fichiers. Non
+  touché à dessein : `pipeline/inpainting.py:76` (le nettoyage doit voir l'image déjà nettoyée).
+  Détail : ADR-016 (`specs/decisions.md`).
+- Tests : `tests/test_analysis_on_original.py` (`--gui`, garde statique sur les 5 appels + test
+  réel, vérifié qu'il échoue sans le correctif), `tests/test_block_versions_handlers.py` adapté à
+  la nouvelle signature. Suites : 247 passed hors GUI ; `--gui` 326 passed, 3 skipped, 1 failed
+  (`test_app.py`, échec amont connu).
+- Piège d'implémentation consigné dans `CLAUDE.md` : `app/controllers/manual_workflow.py` a des
+  fins de ligne mixtes (CRLF/CR/LF) — l'éditer en octets, sinon tout le fichier apparaît modifié.
+- Reste à faire : test manuel de Philippe sur la 2a, commit des deux lots, décision 2b-bis.
+
 ## 2026-09-25 — Spec 04 jalon 1 : test manuel validé
 
 - Premier test réel : pastilles présentes mais **invisibles sur thème sombre** (case éteinte =
@@ -16,6 +66,11 @@
   désormais en Ethernet seul, 192.168.1.101). Résolu par redémarrage de l'Air. Note de `CLAUDE.md`
   corrigée (elle accusait Little Snitch à tort).
 - Test manuel de Philippe : **pastilles fonctionnelles**.
+- Spec 03 jalon B, test manuel : bouton Original et export avec voile actif OK. La touche Option
+  maintenue a d'abord semblé sans effet (le message du commit `8de9415` le note « à
+  diagnostiquer ») ; un journal temporaire a montré armement, dessin du voile et désarmement
+  corrects à chaque appui, et le nouvel essai de Philippe l'a confirmé : **fonctionne**. Aucun
+  changement de code, journal de diagnostic retiré.
 - Reste à faire : commit du jalon B de la spec 03 puis du jalon 1 de la spec 04 ; décision sur le
   mode webtoon avant le jalon 2.
 

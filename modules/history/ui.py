@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from controller import ComicTranslate
 
 _BUTTON_SVG = "detail_line.svg"
+_BUTTON_TEXT = "Historique"
 _BUTTON_TOOLTIP = "Historique du bloc"
 _EMPTY_SELECTION_LABEL = "Aucun bloc sélectionné"
 _NO_HISTORY_LABEL = "Aucun historique pour ce bloc"
@@ -39,8 +40,10 @@ def attach_block_history_button(
 ) -> QtWidgets.QToolButton:
     """Ajoute le bouton d'historique à `layout` (t_combo_text_layout, voir
     `workspace.py`). Toujours actif : la désactivation « pas de bloc » se
-    traduit par un menu grisé, pas par un bouton désactivé (M7)."""
-    button = main.create_tool_button(svg=_BUTTON_SVG)
+    traduit par un menu grisé, pas par un bouton désactivé (M7). Texte « Historique » à côté de
+    l'icône (spec 04, jalon 2, sous-étape 2a) : nommé plutôt qu'une icône isolée, dans le panneau
+    contextuel reparenté par `modules/shell/layout.py`."""
+    button = main.create_tool_button(text=main.tr(_BUTTON_TEXT), svg=_BUTTON_SVG)
     button.setToolTip(main.tr(_BUTTON_TOOLTIP))
     button.clicked.connect(lambda: _show_history_menu(main, button))
     layout.addWidget(button)

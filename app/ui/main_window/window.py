@@ -6,6 +6,7 @@ if sys.platform == "win32":
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from modules.view.original import OriginalViewImageViewer  # fork: voir l'original (spec 03 jalon B)
+from modules.shell.layout import build_workspace_shell  # fork: nouvelle disposition (spec 04 jalon 2, 2a)
 from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.theme import MTheme
@@ -172,7 +173,7 @@ class ComicTranslateUI(
         self.main_layout.addLayout(nav_rail_layout)
         self.main_layout.addWidget(MDivider(orientation=QtCore.Qt.Vertical))
 
-        self.main_content_widget = self._create_main_content()
+        self.main_content_widget = build_workspace_shell(self, self._create_main_content())  # fork: nouvelle disposition (spec 04 jalon 2, 2a)
         self.title_bar.set_undo_redo_widget(self.undo_tool_group)
         self._center_stack = QtWidgets.QStackedWidget()
 

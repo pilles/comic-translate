@@ -154,6 +154,32 @@ les pastilles reflètent exactement ce qui a été fait. Aucun ancien `.ctpr` ne
 rendu, historique par bulle, bouton Original, exports image/CBZ/PDF/PSD, ouverture et sauvegarde de
 projet. Rien de neuf, rien de cassé.
 
+> **Découpage** : le jalon 2 est livré en quatre sous-étapes.
+>
+> **2a — nouvelle disposition, livrée le 2026-09-27.** `modules/shell/` (nouveau paquet) reparente
+> les mêmes objets construits par `_create_main_content` (jamais recréés) dans une disposition à 3
+> colonnes : pages + recherche à gauche, page + badge Original en surimpression au centre, panneau
+> droit (Source/Traduction, Historique, Rendu du texte, Outils) à droite. Amont touché :
+> `app/ui/main_window/window.py` (2 lignes `# fork:`), `tests/conftest.py` (1 ligne) — zéro ligne
+> dans `workspace.py`/`nav.py`/`controller.py`/les contrôleurs/`pipeline/`. Interrupteur
+> `COMIC_SHELL=0` pour revenir à l'ancienne disposition sans bandeau (diagnostic). Détail complet :
+> ADR-015 (`specs/decisions.md`).
+> Mesures : champs texte 136/135 px à 1225×797 (contre 120 px fixes avant), 84/83 px à 1066×693
+> (« Texte plus grand » — sous les 120 px d'avant, voir 2c). Tests : `tests/test_shell.py` (7, hors
+> GUI), `tests/test_shell_ui.py` (30, `--gui`).
+> Maquette versionnée : `specs/maquette-atelier.html`.
+>
+> Reste à faire : **2b** (radios et interrupteur webtoon parqués cachés, Cancel grisé au repos et
+> actif seulement pendant un lot), **2b-bis** (issue au défaut amont n°3 de l'ADR-014 —
+> `task_runner.py`, ne jamais se déclencher pendant l'exécution d'un lot ; **décision de Philippe
+> en attente**), **2c** (pile Page/Bulle, règle de focus lue sur `window().focusWidget()`).
+> « Source jamais vidée » (annotation 4 de la maquette) : **reporté**.
+>
+> **Note** : un hotfix sans rapport avec le jalon 2 a été livré le même jour (analyse du texte de
+> la page sur l'image d'origine plutôt que sur l'image nettoyée, ADR-016) — il supprimait un piège
+> qui gênait tous les tests manuels de la nouvelle disposition (blocs remplacés par zéro après un
+> cycle Détecter/Nettoyer/Détecter).
+
 ### Jalon 3 — Action unique et retours explicites
 
 *But :* ne plus avoir à connaître l'ordre des étapes, ne plus subir le silence.
@@ -211,8 +237,10 @@ réglages ; parcourir 10 pages et corriger 3 bulles sans toucher la souris.
 
 ## 7. Reste ouvert
 
-- Le mode webtoon est hors périmètre de tous les jalons, comme pour les specs 02 et 03. À trancher
-  avant le jalon 2 : la nouvelle fenêtre doit-elle le proposer, ou le fork l'abandonne-t-il ?
+- ~~Mode webtoon~~ — **tranché le 2026-09-25 par Philippe : le fork abandonne le webtoon.** La
+  nouvelle fenêtre ne le propose pas (aucun interrupteur, aucun chemin d'accès). Le code amont
+  webtoon n'est **pas supprimé** (diff amont minimal, rebase) : il reste en place, inaccessible
+  depuis l'interface du fork.
 - L'historique par bulle (jalon A de la spec 03) ne couvre pas le traitement par lot. À décider au
   jalon 4 : enregistre-t-on une version par bulle pendant un lot de 242 pages, ou seulement en
   manuel ?

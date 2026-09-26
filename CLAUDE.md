@@ -13,6 +13,7 @@ et les contraintes non négociables (§6).
 ```bash
 uv sync                                                    # installe l'environnement
 uv run comic.py                                            # lance l'app (GUI)
+COMIC_SHELL=0 uv run comic.py                               # ancienne disposition (diagnostic, ADR-015)
 uv run pytest                                               # tests hors GUI (défaut)
 QT_QPA_PLATFORM=offscreen uv run pytest --gui               # inclut tests/test_app.py
 uv run python tools/sync_deps.py --check                    # vérifie pyproject.toml vs requirements.txt
@@ -81,6 +82,13 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   purs (déduction pure sur `blk_list`/`image_states`, **aucune écriture, jamais d'ajout d'écriture
   dans ce paquet**), `ui.py` (délégué par composition, seul fichier à importer PySide6). Importé
   uniquement depuis `controller.py`. Détail : ADR-014.
+- `modules/shell/` — nouvelle disposition (spec 04 jalon 2, sous-étape 2a) : reparente les mêmes
+  objets construits par `_create_main_content` (jamais recréés — ~400 lectures de widgets par nom
+  dans les contrôleurs) dans une disposition à 3 colonnes. `manifest.py` (pur, noms d'attributs par
+  zone) **seul fichier à revoir au rebase amont**. Importé uniquement depuis `window.py`,
+  n'importe jamais `app.controllers`/`app.ui.main_window`. Repli visible si le reparentage échoue
+  (`main._shell_active = False`) ; interrupteur `COMIC_SHELL=0` pour l'ancienne disposition sans
+  bandeau. Détail : ADR-015.
 
 ## Traduction locale (Ollama)
 
@@ -104,6 +112,14 @@ nettoyage) doit rester insensible à l'affichage. Le voile « voir l'original »
 original.py`) est peint uniquement par la vue (`drawForeground`), jamais par une modification
 d'item ou de `visible`. Ne pas réintroduire de mécanisme `setVisible` par item pour une future
 visibilité par couche sans revoir « enregistrer l'image courante » (ADR-013).
+
+## Règle « analyse du texte sur l'image d'origine »
+
+Toute analyse du texte de la page (détection, OCR, segmentation, traduction) lit
+`get_image_array(include_patches=False)` ; seul le nettoyage (`pipeline/inpainting.py`) lit
+l'image avec patchs — il peint par-dessus des patchs déjà posés (ADR-016). Piège rencontré :
+`app/controllers/manual_workflow.py` a des fins de ligne mixtes (CRLF/CR/LF) — l'éditer en octets,
+sinon tout le fichier apparaît modifié dans le diff.
 
 ## Interdits
 

@@ -210,7 +210,15 @@ def attach_original_button(main: "ComicTranslate", layout: QBoxLayout) -> MPushB
     """Ajoute le bouton bascule « Original » à `layout` (`misc_lay`, voir
     `app/ui/main_window/builders/workspace.py`), juste avant son
     `addStretch()` terminal, et installe le filtre Alt applicatif. Précédent
-    d'attache : `modules/history/ui.py::attach_block_history_button`."""
+    d'attache : `modules/history/ui.py::attach_block_history_button`.
+
+    Depuis la spec 04 (jalon 2, sous-étape 2a), `modules/shell/layout.py` reparente ensuite ce
+    bouton comme enfant hors flux du conteneur central (au-dessus de `central_stack`, jamais dans
+    la scène ni le viewport) et prend en charge son positionnement (coin haut-droit, décalé de la
+    largeur de la barre de défilement verticale si visible) et sa visibilité (masqué hors de
+    `image_viewer`). Cette fonction ne fait toujours que l'attache amont initiale — position dans
+    `misc_lay`, filtre Alt — le shell ne change rien à ce comportement amont-côté, pour que le
+    repli (interface d'origine intacte) garde le bouton fonctionnel."""
     viewer = main.image_viewer
     button = MPushButton(main.tr(_BUTTON_TEXT))
     button.setCheckable(True)

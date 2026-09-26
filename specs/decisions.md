@@ -681,3 +681,131 @@ peintures, ticks et rafraîchissements — lecture seule prouvée, pas seulement
   instantanés au lieu d'attendre le chien de garde à 500 ms) : écartée, 1 ligne amont pour gagner
   0,5 s de latence perçue — à réintroduire seulement si Philippe trouve la latence gênante à
   l'usage.
+
+**Amendement 2026-09-27** : le bouton **Original** est repositionné par `modules/shell/` en
+surimpression en haut à droite de la page (spec 04 jalon 2, sous-étape 2a, ADR-015) — le
+mécanisme du voile lui-même (peinture dans `drawForeground`, déclencheurs bouton/Alt) est
+inchangé.
+
+## ADR-015 — Nouvelle disposition par reparentage des widgets amont
+
+Date : 2026-09-27
+Statut : Adoptée (jalon 2 de la spec 04, sous-étape 2a livrée, test manuel de Philippe en attente)
+
+**Contexte** : spec 04 jalon 2, « la coquille de la maquette, sans aucune fonction nouvelle »
+(maquette « Atelier de traduction BD », `specs/maquette-atelier.html`). Les contrôleurs lisent les
+widgets par nom (`text.py:34-42` capture des références, ~400 lectures dans le dépôt) — toute
+recréation d'objet casserait ces références.
+
+**Options considérées** :
+- **A (retenue)** : le constructeur amont `_create_main_content` s'exécute tel quel ; le shell
+  **reparente les mêmes objets** (jamais recréés) dans une disposition à 3 colonnes.
+- **B (rejetée)** : recréer les widgets dans la nouvelle disposition. Rejetée — casserait les ~400
+  lectures par nom des contrôleurs, coût de correction disproportionné et fragile (toute lecture
+  oubliée plante silencieusement au premier usage).
+- **C (rejetée)** : `QDockWidget` pour chaque zone. Rejetée — moins fidèle à la maquette (barres de
+  titre de dock, redocking libre non désiré), pas de gain sur le problème de reparentage.
+
+**Décision** — `modules/shell/` (nouveau paquet) :
+- `manifest.py` (pur) : noms d'attributs par zone (HEADER, PROGRESS, LEFT, CENTER, OVERLAY, PAGE,
+  BUBBLE, RENDER, TOOLS, PARKED vide en 2a, EXTERNAL `undo_tool_group`) — **seul fichier à revoir
+  au rebase amont**.
+- `context.py` (pur), `panel.py` (squelette du panneau droit), `layout.py`
+  (`build_workspace_shell(main, legacy_content)`) — orchestration du reparentage.
+- Disposition : pages + recherche à gauche, `central_stack` au centre avec le badge Original en
+  surimpression en haut à droite (enfant du conteneur central, hors scène/viewport/
+  `drawForeground` → absent de tous les exports), panneau droit en `QSplitter` vertical (Source /
+  Traduction, rangée Historique + Set for all, groupe Rendu du texte, groupe Outils en bas, 3
+  rangées, décision de Philippe 2026-09-26).
+- **Tout-ou-rien** : valider sans rien toucher → construire à vide → déplacer avec journal (index
+  relevé au moment du déplacement) → finaliser (ancien contenu parqué caché dans
+  `main._shell_legacy`, parent `main`, jamais détruit). Toute erreur → retour arrière exact +
+  **repli visible** (bandeau « Nouvelle disposition indisponible… », `main._shell_active = False`,
+  `main._shell_failure`) — jamais un échec silencieux.
+- **Interrupteur `COMIC_SHELL=0`** : relance l'app dans l'ancienne disposition sans bandeau, pour
+  départager un défaut du shell d'un défaut préexistant de l'amont (a servi le 2026-09-27, voir
+  ADR-016).
+- Amont touché : `app/ui/main_window/window.py` (2 lignes `# fork:` : import + construction du
+  shell), `tests/conftest.py` (1 ligne). **Zéro ligne** dans `workspace.py`, `nav.py`,
+  `controller.py`, les contrôleurs, `pipeline/`. `modules/view/original.py` : docstring seulement
+  (le shell repositionne le bouton, mécanisme inchangé — voir amendement ADR-013 ci-dessus).
+
+**Chaîne de conception** : architect (options A/B/C) → critic pass 1 (« Architect must revise » :
+bloquant — bouton Original dans l'en-tête contraire à la maquette ; majeurs — focus déplacé par
+`QStackedLayout`, Cancel actif au repos, perte de l'issue de secours du défaut amont n°3
+(ADR-014), colonne d'outils verticale mal justifiée, repli partiel, garde aveugle aux widgets
+locaux, affirmation webtoon erronée) → décisions de Philippe (outils en bas du panneau droit,
+aucun `.ctpr` webtoon) → conception v2 → critic pass 2 (« Acceptable to proceed », conditions :
+focus lu via `window().focusWidget()`, 2b-bis jamais pendant un lot et comparaison par `==`, index
+relevé au déplacement, badge repositionné/masqué au départ/`raise_()`, fixture sans effet de bord)
+→ implementer (2a) → tester (OK, 12 tests ajoutés, régression de hauteur mesurée et corrigée) →
+correctif implementer → test manuel de Philippe en attente.
+
+**Mesures** (offscreen) : champs texte 136/135 px à 1225×797 (Air 13" par défaut, contre 120 px
+fixes avant), 84/83 px à 1066×693 (« Texte plus grand », sous les 120 px d'avant — la sous-étape
+2c retirera les listes de langue de la section Bulle pour regagner cette hauteur). Première
+version à 114/62 px corrigée (libellé et liste de langue mis sur la même rangée, espacements
+resserrés). Nom de police tronqué corrigé (police seule sur sa rangée).
+
+**Tests** : `tests/test_shell.py` (7, hors GUI, dont non-import PySide6), `tests/test_shell_ui.py`
+(30, `--gui`) : garde de couverture sur les descendants interactifs de `_shell_legacy` (prouvée par
+injection d'un bouton non listé), repli simulé, retour arrière par injection d'erreur à 4 points
+(ordre des layouts, `QSplitter` et `QScrollArea` compris), badge (hors viewport/scène, masqué sur
+l'écran vide, repositionné quand la barre de défilement apparaît, `save_state` et rendu identiques
+badge coché ou non), undo/redo de la barre de titre, recherche Ctrl+F, thème dayu appliqué aux
+widgets déplacés, identité des widgets, hauteur des champs ≥ 120 px à 1225×797.
+
+**Conséquences et reste à faire** :
+- Maquette versionnée : `specs/maquette-atelier.html`.
+- **2b** (radios et interrupteur webtoon parqués cachés, fonctions de mode neutres, Cancel grisé
+  au repos et actif seulement pendant un lot, `webtoon_mode = False` en tête de
+  `update_ui_from_project`), **2b-bis** (issue au défaut amont n°3 de l'ADR-014 — correction de 3
+  lignes dans `task_runner.py`, qui ne doit jamais se déclencher pendant l'exécution d'un lot,
+  sinon variante sans ligne amont par scrutation ; **décision de Philippe en attente**), **2c**
+  (pile Page/Bulle, observateur, règle de focus lue sur `window().focusWidget()` avant
+  `setCurrentIndex`, test « fenêtre inactive »).
+- « Source jamais vidée » (annotation 4 de la maquette) : **reporté**, défauts amont
+  (`image.py:1131`, `text.py:929`, `rect_item.py:62-63`) non corrigés.
+
+## ADR-016 — Analyse du texte sur l'image d'origine (hotfix)
+
+Date : 2026-09-27
+Statut : Adoptée (hotfix)
+
+**Contexte** : test manuel de Philippe sur la nouvelle disposition (2a) — après quelques cycles
+Détecter/Reconnaître/Traduire/Segmenter/Nettoyer/Rendre, « plus rien ne fonctionne » : boutons
+cliquables sans effet, aucune erreur au journal. Départagé de la nouvelle disposition par
+`COMIC_SHELL=0` : le défaut est préexistant à l'amont, indépendant du shell.
+
+**Diagnostic** (lanceur de diagnostic hors dépôt qui trace la file de tâches et les clics) : la
+file n'est pas bloquée, chaque opération démarre et se termine. « Détecter » sur une page déjà
+nettoyée passait de 10 blocs à **0** : `pipeline/block_detection.py` analysait
+`image_viewer.get_image_array()`, qui inclut par défaut les patchs de nettoyage — le texte anglais
+n'est plus dans l'image, la détection ne trouve rien et **remplace les blocs existants par zéro**.
+Ensuite « Reconnaître » n'a plus de rectangle (garde silencieuse déjà connue, `pipeline/
+ocr_handler.py:24`) et « Rendre » avec 0 bloc efface les textes rendus. Récupération : Cmd+Z.
+
+**Décision** : `get_image_array(include_patches=False)` aux 5 appels qui analysent le texte de la
+page courante — `pipeline/block_detection.py` (détection), `pipeline/ocr_handler.py`
+(reconnaissance, et clé de cache OCR désormais stable après nettoyage), `pipeline/
+translation_handler.py` (image de contexte du traducteur et clé de cache), `app/controllers/
+manual_workflow.py` ×2 (segmentation : masque du texte à nettoyer, page seule). 5 lignes
+`# fork:` dans 4 fichiers.
+
+**Non modifié à dessein** : `pipeline/inpainting.py:76` — le nettoyage peint par-dessus les
+patchs déjà posés et doit voir l'image déjà nettoyée, pas l'original. Le traitement par lot lisait
+déjà l'image depuis le fichier (donc l'original), non affecté.
+
+**Tests** : `tests/test_analysis_on_original.py` (`--gui`, 1 ligne `# fork:` dans
+`tests/conftest.py`) : garde statique sur les 5 appels + test réel (patch blanc posé dans la
+scène, la détection voit la photo d'origine) ; vérifié qu'il échoue sans le correctif.
+`tests/test_block_versions_handlers.py` adapté (faux lecteur d'image à la nouvelle signature).
+Suites : 247 passed hors GUI ; `--gui` 326 passed, 3 skipped, 1 failed (`test_app.py`, échec amont
+connu).
+
+**Piège d'implémentation** : `app/controllers/manual_workflow.py` a des fins de ligne mixtes
+(CRLF, CR, LF) — l'éditer en octets, sinon tout le fichier apparaît modifié dans le diff.
+
+**Conséquences** : règle ajoutée à `CLAUDE.md` — toute analyse du texte de la page (détection,
+OCR, segmentation, traduction) lit `get_image_array(include_patches=False)` ; seul le nettoyage
+lit l'image avec patchs.

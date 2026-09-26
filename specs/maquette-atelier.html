@@ -1,0 +1,558 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Atelier de traduction BD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --ink:#0e1014;
+    --ground:#14171c;
+    --panel:#1b1f26;
+    --raised:#232831;
+    --line:#333a46;
+    --line-soft:#272d37;
+    --text:#e9ebef;
+    --dim:#98a1ae;
+    --faint:#6c7584;
+    --accent:#d99a4e;
+    --accent-dim:rgba(217,154,78,.16);
+    --accent-line:rgba(217,154,78,.45);
+    --ok:#74a96e;
+    --wait:#545c6a;
+    --paper:#f6f3ec;
+    --paper-ink:#2b2f38;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --display:"Bricolage Grotesque","IBM Plex Sans",sans-serif;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ink);color:var(--text);
+    font-family:var(--sans);font-size:15px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:56px 80px}
+
+  /* ---------- en-tête ---------- */
+  .eyebrow{
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px;
+  }
+  h1{
+    font-family:var(--display);font-weight:800;font-size:clamp(34px,6vw,54px);
+    line-height:1.02;letter-spacing:-.02em;margin:0 0 18px;text-wrap:balance;
+  }
+  .lede{max-width:64ch;color:var(--dim);font-size:16.5px;margin:0 0 10px}
+  .lede strong{color:var(--text);font-weight:500}
+  .meta{
+    font-family:var(--mono);font-size:12px;color:var(--faint);
+    margin-top:22px;padding-top:16px;border-top:1px solid var(--line-soft);
+    display:flex;flex-wrap:wrap;gap:8px 22px;
+  }
+
+  /* ---------- maquette ---------- */
+  .shot{margin:46px 0 0}
+  .shot-scroll{overflow-x:auto;padding-bottom:6px}
+  .app{
+    position:relative;width:980px;background:var(--ground);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:0 24px 60px rgba(0,0,0,.45);
+  }
+
+  .titlebar{
+    display:flex;align-items:center;gap:14px;
+    padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line-soft);
+  }
+  .dots{display:flex;gap:7px}
+  .dots i{width:11px;height:11px;border-radius:50%;display:block}
+  .dots i:nth-child(1){background:#e0605a}
+  .dots i:nth-child(2){background:#e0b04f}
+  .dots i:nth-child(3){background:#68b45f}
+  .proj{font-size:13px;color:var(--text);font-weight:500}
+  .proj span{color:var(--faint);font-weight:400}
+  .saved{
+    margin-left:auto;display:flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:11px;color:var(--ok);
+  }
+  .saved b{width:6px;height:6px;border-radius:50%;background:var(--ok);display:block}
+  .hist-btns{display:flex;gap:6px}
+  .hist-btns em{
+    font-style:normal;font-family:var(--mono);font-size:13px;color:var(--dim);
+    width:26px;height:24px;display:grid;place-items:center;
+    border:1px solid var(--line-soft);border-radius:6px;
+  }
+
+  .body{display:grid;grid-template-columns:168px 1fr 268px;min-height:540px}
+
+  /* colonne pages */
+  .pages{background:var(--panel);border-right:1px solid var(--line-soft);padding:12px 10px}
+  .pages-head{
+    display:flex;align-items:baseline;justify-content:space-between;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--faint);padding:0 4px 10px;
+  }
+  .pages-head u{text-decoration:none;color:var(--accent)}
+  .thumb{
+    display:flex;gap:9px;align-items:center;padding:7px;border-radius:8px;margin-bottom:3px;
+  }
+  .thumb.on{background:var(--raised);outline:1px solid var(--accent-line)}
+  .mini{
+    width:34px;height:46px;border-radius:3px;background:var(--paper);flex:none;
+    display:grid;grid-template-rows:1fr 1fr;gap:2px;padding:3px;
+  }
+  .mini u{display:block;background:#c9cdd6;border-radius:1px;text-decoration:none}
+  .thumb-meta{min-width:0;flex:1}
+  .thumb-name{font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+  .thumb.on .thumb-name{color:var(--text)}
+  .track{display:flex;gap:3px;margin-top:6px}
+  .track i{height:3px;flex:1;border-radius:2px;background:var(--wait);display:block}
+  .track i.d{background:var(--ok)}
+  .track i.w{background:var(--accent)}
+
+  /* canevas */
+  .canvas{
+    position:relative;background:#0d0f13;display:grid;place-items:center;padding:22px;
+  }
+  .page-svg{width:296px;height:auto;display:block;border-radius:2px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .veil{
+    position:absolute;top:14px;right:16px;display:flex;align-items:center;gap:8px;
+    background:rgba(27,31,38,.92);border:1px solid var(--line);border-radius:8px;
+    padding:6px 10px;font-size:12px;color:var(--dim);
+  }
+  .veil b{color:var(--text);font-weight:500}
+  .veil kbd{
+    font-family:var(--mono);font-size:10.5px;color:var(--faint);
+    border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+  }
+
+  /* barre d'étapes */
+  .steps{
+    position:absolute;left:50%;transform:translateX(-50%);bottom:16px;
+    display:flex;align-items:center;gap:4px;
+    background:rgba(27,31,38,.96);border:1px solid var(--line);
+    border-radius:10px;padding:7px 8px;box-shadow:0 10px 26px rgba(0,0,0,.5);
+  }
+  .step{
+    display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:7px;
+    font-size:12px;color:var(--faint);white-space:nowrap;
+  }
+  .step i{
+    width:14px;height:14px;border-radius:50%;display:grid;place-items:center;flex:none;
+    border:1.5px solid var(--wait);font-size:9px;font-family:var(--mono);color:var(--ink);
+  }
+  .step.done{color:var(--dim)}
+  .step.done i{background:var(--ok);border-color:var(--ok)}
+  .step.now{background:var(--accent-dim);color:var(--text)}
+  .step.now i{border-color:var(--accent);border-style:dashed}
+  .go{
+    margin-left:4px;background:var(--accent);color:#231604;border:0;border-radius:7px;
+    font-family:var(--sans);font-weight:600;font-size:12.5px;padding:7px 13px;cursor:default;
+  }
+
+  /* toast */
+  .toast{
+    position:absolute;left:50%;transform:translateX(-50%);bottom:68px;
+    display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);
+    background:rgba(13,15,19,.95);border:1px solid var(--line-soft);border-radius:8px;
+    padding:6px 11px;
+  }
+  .toast b{color:var(--text);font-weight:500}
+
+  /* panneau droit */
+  .side{background:var(--panel);border-left:1px solid var(--line-soft);padding:14px 13px;display:flex;flex-direction:column;gap:14px}
+  .side-head{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+    display:flex;justify-content:space-between;align-items:baseline;
+  }
+  .side-head u{text-decoration:none;color:var(--accent)}
+  .field label{
+    display:block;font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:5px;
+  }
+  .box{
+    background:var(--raised);border:1px solid var(--line-soft);border-radius:7px;
+    padding:8px 10px;font-size:12.5px;line-height:1.5;color:var(--dim);
+  }
+  .box.src{color:var(--dim)}
+  .box.trg{color:var(--text);border-color:var(--accent-line);min-height:74px}
+  .row{display:flex;gap:7px;align-items:center}
+  .chip{
+    font-size:11.5px;color:var(--dim);background:var(--raised);
+    border:1px solid var(--line-soft);border-radius:6px;padding:4px 9px;
+  }
+  .chip.act{color:var(--text);border-color:var(--line)}
+  .chip u{text-decoration:none;color:var(--accent);font-family:var(--mono);font-size:10.5px}
+  .sep{height:1px;background:var(--line-soft);margin:2px 0}
+  .tool-row{display:flex;gap:6px;flex-wrap:wrap}
+  .tool{
+    width:30px;height:28px;border:1px solid var(--line-soft);border-radius:6px;
+    display:grid;place-items:center;color:var(--faint);background:var(--raised);
+  }
+  .tool.on{border-color:var(--accent-line);color:var(--accent);background:var(--accent-dim)}
+  .tool svg{width:15px;height:15px;display:block}
+
+  /* marqueurs */
+  .mk{
+    position:absolute;width:21px;height:21px;border-radius:50%;
+    background:var(--accent);color:#231604;
+    font-family:var(--mono);font-size:11px;font-weight:500;
+    display:grid;place-items:center;
+    box-shadow:0 0 0 3px var(--ground),0 3px 10px rgba(0,0,0,.6);z-index:5;
+  }
+
+  .caption{
+    font-family:var(--mono);font-size:11.5px;color:var(--faint);
+    margin-top:12px;display:flex;gap:8px;align-items:baseline;
+  }
+
+  /* ---------- notes ---------- */
+  h2{
+    font-family:var(--display);font-weight:600;font-size:23px;letter-spacing:-.01em;
+    margin:60px 0 6px;
+  }
+  .sub{color:var(--faint);font-size:14px;margin:0 0 26px;max-width:62ch}
+  .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(288px,1fr));gap:2px 30px}
+  .note{display:flex;gap:13px;padding:14px 0;border-top:1px solid var(--line-soft)}
+  .note-n{
+    font-family:var(--mono);font-size:11px;color:var(--accent);
+    border:1px solid var(--accent-line);border-radius:50%;
+    width:22px;height:22px;flex:none;display:grid;place-items:center;margin-top:2px;
+  }
+  .note h3{font-size:14.5px;font-weight:600;margin:0 0 4px;letter-spacing:-.005em}
+  .note p{margin:0;font-size:13.5px;color:var(--dim);line-height:1.55}
+  .note p em{font-style:normal;font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:34px}
+  ul.plain{margin:0;padding:0;list-style:none}
+  ul.plain li{
+    padding:9px 0 9px 20px;border-top:1px solid var(--line-soft);
+    font-size:14px;color:var(--dim);position:relative;
+  }
+  ul.plain li::before{
+    content:"";position:absolute;left:2px;top:17px;width:6px;height:6px;border-radius:50%;
+    background:var(--wait);
+  }
+  ul.keep li::before{background:var(--ok)}
+  ul.open li::before{background:var(--accent)}
+  ul.plain li b{color:var(--text);font-weight:500}
+
+  footer{
+    margin-top:64px;padding-top:18px;border-top:1px solid var(--line-soft);
+    font-family:var(--mono);font-size:11.5px;color:var(--faint);
+  }
+
+  @media (max-width:760px){
+    .wrap{padding-block:40px 60px}
+    .notes{grid-template-columns:1fr}
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Proposition · comic-translate</p>
+  <h1>Atelier de traduction BD</h1>
+  <p class="lede">
+    L'application actuelle expose <strong>son pipeline</strong> — six boutons de même poids, dans un
+    ordre qu'il faut connaître — là où l'on attend <strong>une tâche</strong>. Cette maquette propose
+    l'inverse : une action principale, un état d'avancement visible, et un panneau qui ne montre que
+    ce qui concerne la bulle sélectionnée.
+  </p>
+  <p class="lede">
+    Elle ne change ni le moteur de traduction, ni le nettoyage, ni le format de projet. C'est un
+    support de discussion, pas une spécification.
+  </p>
+  <div class="meta">
+    <span>21 septembre 2026</span>
+    <span>PySide6 · fork filvyb/comic-translate</span>
+    <span>8 annotations</span>
+  </div>
+
+  <div class="shot">
+    <div class="shot-scroll">
+      <div class="app">
+
+        <!-- barre de titre -->
+        <div class="titlebar">
+          <div class="dots"><i></i><i></i><i></i></div>
+          <div class="proj">Fun Home <span>— 242 pages</span></div>
+          <div class="hist-btns"><em>↶</em><em>↷</em></div>
+          <div class="saved"><b></b> Enregistré il y a 2 min</div>
+          <div class="mk" style="top:6px;right:-10px">8</div>
+        </div>
+
+        <div class="body">
+
+          <!-- pages -->
+          <div class="pages">
+            <div class="pages-head"><span>Pages</span><u>À revoir · 4</u></div>
+
+            <div class="thumb">
+              <div class="mini"><u></u><u></u></div>
+              <div class="thumb-meta">
+                <div class="thumb-name">018</div>
+                <div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div>
+              </div>
+            </div>
+
+            <div class="thumb">
+              <div class="mini"><u></u><u></u></div>
+              <div class="thumb-meta">
+                <div class="thumb-name">019</div>
+                <div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div>
+              </div>
+            </div>
+
+            <div class="thumb on">
+              <div class="mini"><u></u><u></u></div>
+              <div class="thumb-meta">
+                <div class="thumb-name">020</div>
+                <div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="w"></i><i></i></div>
+              </div>
+            </div>
+
+            <div class="thumb">
+              <div class="mini"><u></u><u></u></div>
+              <div class="thumb-meta">
+                <div class="thumb-name">021</div>
+                <div class="track"><i class="d"></i><i></i><i></i><i></i><i></i></div>
+              </div>
+            </div>
+
+            <div class="thumb">
+              <div class="mini"><u></u><u></u></div>
+              <div class="thumb-meta">
+                <div class="thumb-name">022</div>
+                <div class="track"><i></i><i></i><i></i><i></i><i></i></div>
+              </div>
+            </div>
+
+            <div class="mk" style="top:96px;left:150px">1</div>
+          </div>
+
+          <!-- canevas -->
+          <div class="canvas">
+            <svg class="page-svg" viewBox="0 0 296 396" role="img" aria-label="Page de bande dessinée avec deux cases et trois bulles">
+              <rect width="296" height="396" fill="#f6f3ec"/>
+              <!-- légende haute -->
+              <rect x="18" y="16" width="120" height="26" fill="#ffffff" stroke="#2b2f38" stroke-width="1"/>
+              <rect x="24" y="23" width="104" height="3.4" fill="#8e94a0"/>
+              <rect x="24" y="31" width="78" height="3.4" fill="#8e94a0"/>
+              <rect x="156" y="16" width="122" height="26" fill="#ffffff" stroke="#2b2f38" stroke-width="1"/>
+              <rect x="162" y="23" width="106" height="3.4" fill="#8e94a0"/>
+              <rect x="162" y="31" width="64" height="3.4" fill="#8e94a0"/>
+              <!-- case 1 -->
+              <rect x="18" y="52" width="120" height="164" fill="#e8eef6" stroke="#2b2f38" stroke-width="1.6"/>
+              <path d="M30 196 q22-46 46-22 t34 38" fill="none" stroke="#2b2f38" stroke-width="1.2" opacity=".5"/>
+              <ellipse cx="72" cy="96" rx="40" ry="24" fill="#ffffff" stroke="#2b2f38" stroke-width="1.4"/>
+              <path d="M62 118 l6 16 l12 -14 z" fill="#ffffff" stroke="#2b2f38" stroke-width="1.4"/>
+              <rect x="44" y="88" width="56" height="3.6" fill="#8e94a0"/>
+              <rect x="50" y="97" width="44" height="3.6" fill="#8e94a0"/>
+              <!-- case 2 : bulle sélectionnée -->
+              <rect x="156" y="52" width="122" height="164" fill="#e8eef6" stroke="#2b2f38" stroke-width="1.6"/>
+              <path d="M168 200 q30-54 58-26" fill="none" stroke="#2b2f38" stroke-width="1.2" opacity=".5"/>
+              <ellipse cx="217" cy="100" rx="44" ry="27" fill="#ffffff" stroke="#2b2f38" stroke-width="1.4"/>
+              <path d="M206 124 l5 18 l13 -15 z" fill="#ffffff" stroke="#2b2f38" stroke-width="1.4"/>
+              <rect x="186" y="90" width="62" height="3.6" fill="#40454f"/>
+              <rect x="186" y="99" width="50" height="3.6" fill="#40454f"/>
+              <rect x="186" y="108" width="34" height="3.6" fill="#40454f"/>
+              <rect x="169" y="70" width="96" height="60" fill="none" stroke="#d99a4e" stroke-width="2" rx="2"/>
+              <!-- légende basse -->
+              <rect x="18" y="228" width="260" height="24" fill="#ffffff" stroke="#2b2f38" stroke-width="1"/>
+              <rect x="24" y="235" width="228" height="3.4" fill="#8e94a0"/>
+              <rect x="24" y="243" width="150" height="3.4" fill="#8e94a0"/>
+              <!-- case 3 -->
+              <rect x="18" y="262" width="260" height="116" fill="#e8eef6" stroke="#2b2f38" stroke-width="1.6"/>
+              <path d="M34 360 q54-64 104-30 t110 8" fill="none" stroke="#2b2f38" stroke-width="1.2" opacity=".5"/>
+              <ellipse cx="96" cy="300" rx="42" ry="22" fill="#ffffff" stroke="#2b2f38" stroke-width="1.4"/>
+              <rect x="70" y="294" width="52" height="3.6" fill="#8e94a0"/>
+              <rect x="76" y="303" width="40" height="3.6" fill="#8e94a0"/>
+            </svg>
+
+            <div class="veil">
+              <b>Original</b>
+              <span>ou</span>
+              <kbd>Alt</kbd>
+            </div>
+            <div class="mk" style="top:14px;right:-10px">6</div>
+
+            <div class="toast">
+              <b>10 bulles reconnues</b> · 1 sans texte
+            </div>
+            <div class="mk" style="bottom:72px;left:14px">3</div>
+
+            <div class="steps">
+              <div class="step done"><i>✓</i>Détecter</div>
+              <div class="step done"><i>✓</i>Reconnaître</div>
+              <div class="step done"><i>✓</i>Traduire</div>
+              <div class="step now"><i></i>Nettoyer</div>
+              <div class="step"><i></i>Rendre</div>
+              <button class="go">Continuer</button>
+            </div>
+            <div class="mk" style="bottom:20px;left:14px">2</div>
+          </div>
+
+          <!-- panneau contextuel -->
+          <div class="side">
+            <div class="side-head"><span>Bulle 4 sur 10</span><u>↑ ↓</u></div>
+
+            <div class="field">
+              <label>Anglais · reconnu</label>
+              <div class="box src">AND OF COURSE, MY BROTHERS AND I WERE FREE LABOR. DAD CONSIDERED US EXTENSIONS OF HIS OWN BODY.</div>
+            </div>
+            <div class="mk" style="top:64px;left:-10px">4</div>
+
+            <div class="field">
+              <label>Français · traduction</label>
+              <div class="box trg">ET BIEN SÛR, MES FRÈRES ET MOI, ON ÉTAIT DE LA MAIN-D'ŒUVRE GRATUITE. MON PÈRE NOUS CONSIDÉRAIT COMME DES EXTENSIONS DE SON PROPRE CORPS.</div>
+            </div>
+
+            <div class="row">
+              <span class="chip act">Historique <u>3</u></span>
+              <span class="chip">Retraduire</span>
+            </div>
+            <div class="mk" style="top:280px;left:-10px">5</div>
+
+            <div class="sep"></div>
+
+            <div class="field">
+              <label>Rendu du texte</label>
+              <div class="row">
+                <span class="chip act">Ace 2.0 BB</span>
+                <span class="chip">12</span>
+                <span class="chip">Contour</span>
+              </div>
+            </div>
+
+            <div class="sep"></div>
+
+            <div class="field">
+              <label>Outils</label>
+              <div class="tool-row">
+                <span class="tool on" title="Sélection">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-6 1.5L10 20z"/></svg>
+                </span>
+                <span class="tool" title="Boîte">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="1"/></svg>
+                </span>
+                <span class="tool" title="Pinceau">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20c4 1 6-2 6-5"/><path d="M10 15L19 6a2 2 0 0 0-3-3l-9 9z"/></svg>
+                </span>
+                <span class="tool" title="Gomme">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 16l7-7 7 7-4 4H8z"/><path d="M6 20h12"/></svg>
+                </span>
+                <span class="tool" title="Main">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 11V6a1.5 1.5 0 1 1 3 0v4"/><path d="M10 10V5a1.5 1.5 0 1 1 3 0v5"/><path d="M13 10V6.5a1.5 1.5 0 1 1 3 0V13"/><path d="M7 11v3l-1.5-2a1.4 1.4 0 0 0-2 1.6L6 20h8l2-6.5V10"/></svg>
+                </span>
+              </div>
+            </div>
+            <div class="mk" style="bottom:22px;left:-10px">7</div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption"><span>↔</span><span>Maquette statique. Faites défiler horizontalement sur petit écran.</span></p>
+  </div>
+
+  <h2>Ce que chaque changement corrige</h2>
+  <p class="sub">
+    Chaque annotation renvoie à un défaut relevé dans le code, pas à une impression.
+    Les références complètes sont dans <span style="font-family:var(--mono);font-size:12.5px">specs/03-inventaire.md</span>.
+  </p>
+
+  <div class="notes">
+    <div class="note">
+      <div class="note-n">1</div>
+      <div>
+        <h3>L'état de chaque page se voit</h3>
+        <p>Cinq traits sous la vignette : détectée, reconnue, traduite, nettoyée, rendue. Sur un album de 242 pages, c'est la seule façon de savoir où l'on en est. <em>Aujourd'hui : aucun état nulle part.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">2</div>
+      <div>
+        <h3>Une action, pas six boutons</h3>
+        <p>Les étapes deviennent un avancement, et un seul bouton propose la suite. Chaque étape reste cliquable pour reprendre la main. <em>Aujourd'hui : six boutons de même poids, ordre à deviner.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">3</div>
+      <div>
+        <h3>L'application dit ce qu'elle a fait</h3>
+        <p>« 10 bulles reconnues », « aucun bloc détecté », « modèle injoignable ». <em>Aujourd'hui : « Reconnaître » ne fait rien et ne dit rien s'il n'y a aucun rectangle.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">4</div>
+      <div>
+        <h3>Le texte anglais reste sous les yeux</h3>
+        <p>Étiqueté, jamais vidé au changement de page ni après le rendu. C'est la référence pour juger une traduction. <em>Aujourd'hui : champs sans étiquette, vidés dans les deux cas.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">5</div>
+      <div>
+        <h3>L'historique porte son nom</h3>
+        <p>Un bouton lisible avec le nombre de versions, au lieu d'une icône isolée. Le mécanisme existe déjà et conserve chaque reconnaissance, traduction et correction. <em>Livré, à rendre visible.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">6</div>
+      <div>
+        <h3>Comparer sans rien casser</h3>
+        <p>La bascule et la touche maintenue affichent la page d'origine par-dessus le texte et le nettoyage. L'export n'en tient jamais compte. <em>Livré.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">7</div>
+      <div>
+        <h3>Les outils quittent le panneau de texte</h3>
+        <p>Sélection, boîte, pinceau, gomme, main : une rangée, en bas, séparée des réglages de traduction. <em>Aujourd'hui : quatre sujets sans rapport empilés dans la même colonne.</em></p>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="note-n">8</div>
+      <div>
+        <h3>Le projet s'enregistre tout seul</h3>
+        <p>Sauvegarde active dès l'ouverture d'un album, état visible dans la barre de titre. <em>Aujourd'hui : désactivée par défaut, interrupteur et réglages à deux endroits différents.</em></p>
+      </div>
+    </div>
+  </div>
+
+  <h2>Le socle ne bouge pas</h2>
+  <p class="sub">Tout ce qui suit fonctionne et reste tel quel. La refonte porte sur le parcours, pas sur le moteur.</p>
+
+  <div class="cols">
+    <ul class="plain keep">
+      <li><b>Traduction locale</b> par Ollama, sans compte ni télémétrie</li>
+      <li><b>Nettoyage</b> avec remplissage uni et protection des bords de case</li>
+      <li><b>Historique par bulle</b>, restaurable et enregistré dans le projet</li>
+      <li><b>Projets</b> avec sauvegarde automatique et instantanés de récupération</li>
+      <li><b>Exports</b> image, CBZ, PDF et PSD en trois calques</li>
+    </ul>
+    <ul class="plain open">
+      <li>Parcours cible : <b>page par page</b>, ou album traité puis revu ?</li>
+      <li>Une page déjà traitée s'ouvre sur le <b>rendu final</b> ou sur les bulles cliquables ?</li>
+      <li>Réagencer le panneau existant, ou <b>nouvelle fenêtre</b> ? Le second coûte cher en rebase</li>
+      <li>Faut-il un <b>mode revue</b> au clavier pour corriger un album entier ?</li>
+      <li>Quelle place garde le <b>traitement en lot</b> ?</li>
+    </ul>
+  </div>
+
+  <footer>
+    Support de discussion — aucune ligne de code n'a été écrite pour cette maquette.
+    Détail du diagnostic : specs/brief-refonte-interface.md
+  </footer>
+
+</div>
+
+</body></html>
