@@ -38,7 +38,7 @@ class _FakeImageViewer:
     def hasPhoto(self):
         return True
 
-    def get_image_array(self):
+    def get_image_array(self, paint_all=False, include_patches=True):
         return np.zeros((10, 10, 3), dtype=np.uint8)
 
 

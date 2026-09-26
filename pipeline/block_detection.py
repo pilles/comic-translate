@@ -141,7 +141,7 @@ class BlockDetectionHandler:
             else:
                 # Regular single image mode
                 current_page = None
-                image = self.main_page.image_viewer.get_image_array()
+                image = self.main_page.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
                 blk_list = self.block_detector_cache.detect(image)
                 if blk_list:
                     get_best_render_area(blk_list, image)

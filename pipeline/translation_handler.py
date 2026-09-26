@@ -27,7 +27,7 @@ class TranslationHandler:
         )
         if self.main_page.image_viewer.hasPhoto() and self.main_page.blk_list:
             settings_page = self.main_page.settings_page
-            image = self.main_page.image_viewer.get_image_array()
+            image = self.main_page.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
             extra_context = settings_page.get_llm_settings()['extra_context']
             translator_key = settings_page.get_tool_selection('translator')
 

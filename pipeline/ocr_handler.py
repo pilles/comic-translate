@@ -23,7 +23,7 @@ class OCRHandler:
             self.main_page.lang_mapping,
         )
         if self.main_page.image_viewer.hasPhoto() and self.main_page.image_viewer.rectangles:
-            image = self.main_page.image_viewer.get_image_array()
+            image = self.main_page.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
             ocr_model = self.main_page.settings_page.get_tool_selection('ocr')
             device = resolve_device(
                 self.main_page.settings_page.is_gpu_enabled()

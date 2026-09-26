@@ -621,7 +621,7 @@ class ManualWorkflowController:
             blk_list, load_rects = result
         self.main.blk_list = blk_list
         self.main.undo_group.activeStack().beginMacro("draw_segmentation_boxes")
-        image = self.main.image_viewer.get_image_array()
+        image = self.main.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
         for blk in self.main.blk_list:
             if blk.xyxy is not None:
                 stroke = self.main.image_viewer.drawing_manager.make_segmentation_stroke_data(blk, image)
@@ -714,7 +714,7 @@ class ManualWorkflowController:
                 else:
 
                     def compute_all_strokes() -> list[tuple[TextBlock, Any]]:
-                        image = self.main.image_viewer.get_image_array()
+                        image = self.main.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
                         results = []
                         for blk in self.main.blk_list:
                             stroke = self.main.image_viewer.drawing_manager.make_segmentation_stroke_data(blk, image)

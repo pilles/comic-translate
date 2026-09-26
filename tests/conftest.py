@@ -37,6 +37,7 @@ _GUI_ONLY_FILES = {
     "test_legacy_ctpr_compat.py",  # fork: historique par bloc (jalon A) — vérification tester
     "test_original_view.py",  # fork: voir l'original (spec 03 jalon B)
     "test_pagestate_ui.py",  # fork: état d'avancement par page (spec 04 jalon 1)
+    "test_analysis_on_original.py",  # fork: analyse sur l'original (hotfix 2026-09-27)
 }
 
 
