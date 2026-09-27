@@ -34,6 +34,7 @@ from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from modules.pagestate.ui import attach_page_state  # fork: état d'avancement par page (spec 04 jalon 1)
+from modules.reset.ui import attach_page_reset  # fork: bouton Réinitialiser (spec 04 jalon 3, 3a)
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 
 
@@ -139,6 +140,7 @@ class ComicTranslate(ComicTranslateUI):
 
         self.connect_ui_elements()
         attach_page_state(self)  # fork: état d'avancement par page (spec 04 jalon 1)
+        attach_page_reset(self)  # fork: bouton Réinitialiser (spec 04 jalon 3, 3a)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
 
         self.project_ctrl.load_main_page_settings()

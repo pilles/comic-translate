@@ -418,6 +418,10 @@ def _finalize(
     _unlock_text_edit_heights(main)
     _install_badge_wiring(main, hierarchy)
     main._shell_panel = hierarchy.panel
+    # Bouton « Réinitialiser » la page (spec 04, jalon 3, sous-étape 3a) : exposé pour
+    # `modules/reset/ui.py::attach_page_reset`, seul lecteur de cet attribut — absent en repli
+    # (`_build_fallback` ne le pose pas), le bouton n'est alors pas attaché.
+    main._shell_header_layout = hierarchy.header_layout
     watcher.install_context_watcher(main, hierarchy.panel)
     main._shell_active = True
     main._shell_failure = None

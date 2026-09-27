@@ -247,6 +247,32 @@ projet. Rien de neuf, rien de cassé.
 > - **Critère de réussite manuel** : sur une page traduite, rendue et nettoyée → Réinitialiser →
 >   page d'origine, panneau vide, pastilles éteintes ; Cmd+Z → tout revient ; Détecter repart
 >   normalement.
+>
+> **3a livrée le 2026-09-28, validée à la main par Philippe.** Mécanisme retenu : option C
+> améliorée (`ResetPageCommand` réécrit les clés traitées d'`image_states[p]`/`image_patches[p]`
+> puis recharge par `image_ctrl.load_image_state(p)`, identité de la liste de blocs préservée) —
+> l'option B (détacher/rattacher les items Qt vivants) a été abandonnée après revue du critic
+> (câblage des signaux trop tôt, macro évaluée à l'index 0). Bouton « Réinitialiser » dans l'en-tête
+> (`modules/reset/`, `MPushButton`), actif ssi étapes actives, file de tâches vide, pas de lot, pas
+> webtoon, pile d'annulation = pile de la page affichée. Caches OCR/traduction invalidés (décision de
+> Philippe : Traduire rappelle vraiment Ollama après reset) ; portée = page affichée seule ; macro
+> d'annulation orpheline détectée à l'ouverture → confirmation explicite (« non annulable ») au lieu
+> d'un push silencieux. Amont : `controller.py` (2 lignes `# fork:`), `tests/conftest.py` (1 ligne).
+> Tests : `tests/test_reset.py` (56, hors GUI), `tests/test_reset_ui.py` (46, `--gui`). Suites :
+> 319 passed hors GUI ; `--gui` 487 passed, 3 skipped, 1 failed (`test_app.py`, amont connu). Détail
+> complet, limites (MAJ1 notamment) et alternatives rejetées : ADR-020 (`specs/decisions.md`).
+>
+> **3a-bis (décidée par Philippe le 2026-09-28, à venir)** : corriger la macro d'annulation
+> orpheline — défaut amont préexistant, indépendant du reset : la macro « inpaint »
+> (`manual_workflow.py:605`) n'est fermée qu'au succès (`pipeline/inpainting.py:815`), idem pour la
+> segmentation ; `endMacro` vise `activeStack()` à la fin de l'opération, donc une autre page si
+> l'utilisateur a navigué entre-temps → toute commande suivante sur cette pile tombe dans une macro
+> jamais fermée et Annuler est refusé jusqu'à la fermeture de l'app. Détail : ADR-020.
+>
+> **3a-ter (décidée par Philippe le 2026-09-28, à venir)** : rendre les annulations de texte
+> robustes aux items recréés (MAJ1 de l'ADR-020) — `TextEditCommand`, `RestoreVersionCommand`,
+> `TextFormatCommand` visent un item détruit après navigation ou reset et lèvent `RuntimeError` à
+> l'annulation. Corriger ce défaut réglera aussi le cas général « changer de page puis revenir ».
 
 - Barre d'étapes alimentée par le jalon 1, bouton « Continuer ».
 - Messages de résultat après chaque étape, avec des nombres.

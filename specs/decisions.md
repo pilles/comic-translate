@@ -969,3 +969,107 @@ démarrage de la suivante (quelques tours de boucle d'événements), `_current_o
 encore l'opération terminée ; une annulation dans cette fenêtre pourrait être mal classée — cas
 marginal, non aggravant. Candidat PR amont. Défaut n°3 retiré de la liste des défauts ouverts de
 `CLAUDE.md`.
+
+## ADR-020 — Réinitialiser la page : option C améliorée
+
+Date : 2026-09-28
+Statut : Adoptée (spec 04 jalon 3, sous-étape 3a, validée à la main par Philippe le 2026-09-28)
+
+**Contexte** : demande de Philippe (2026-09-28) — « rajoute un bouton "reset", ça permet de
+repartir sur une page "propre" ». Cadrage initial dans `specs/04-refonte-interface.md` §5 jalon 3 :
+effet = page « jamais traitée » (blocs, rectangles, texte, patchs, tracés, rendu), annulable par
+Cmd+Z en une seule étape, portée = page affichée. Décisions de Philippe retenues telles quelles :
+caches OCR/traduction invalidés (Traduire rappelle vraiment Ollama après reset), portée = page
+affichée seule (le message nomme la page), limite « Annuler au-delà d'un reset annulé » acceptée et
+à corriger plus tard (3a-ter, MAJ1 ci-dessous).
+
+**Options considérées** :
+- **A (rejetée)** : construire une macro d'annulation Qt qui rejoue toutes les commandes existantes
+  (suppression de blocs, de patchs, de tracés) une par une. Rejetée — les commandes existantes ne
+  couvrent pas toutes les clés d'`image_states`/`image_patches`, et empiler N commandes hétérogènes
+  pour un seul clic complique l'annulation partielle sans bénéfice.
+- **B (rejetée après revue du critic, « Architect must revise »)** : détacher les items Qt vivants
+  de la scène (blocs, rectangles, texte) puis les rattacher à l'annulation. Rejetée — bloquant B1
+  (câblage des signaux sur les items trop tôt, avant que la commande sache si elle sera annulée) et
+  B2 (une macro d'annulation évaluée à l'index 0 crée un cas limite non couvert par
+  `QUndoStack.canUndo()`) ; en pratique, une liste de blocs neuve à chaque réexécution aurait
+  imposé de reconstruire l'ordre d'empilement des patchs à chaque fois, et des rectangles hors
+  scène après un « Rendre » réapparaissaient de façon incohérente.
+- **C amélioré (retenu)** : `ResetPageCommand` réécrit les clés **traitées** d'`image_states[p]`
+  (`blk_list`, `brush_strokes`, `viewer_state.rectangles`, `viewer_state.text_items_state`, retrait
+  de `push_to_stack`) et `image_patches[p]`, puis recharge par le chemin de navigation existant
+  (`image_ctrl.load_image_state(p)`). Fidélité visée : « quitter la page et revenir », pas une
+  reconstruction bit à bit de l'état initial du projet.
+
+**Décision** — `modules/reset/` (nouveau paquet) :
+- `state.py` (pur) : `blank_page_state`, `merge_processed`, `is_pristine`, `drop_cache_entries`,
+  `macro_open`, `availability`, messages.
+- `commands.py` : `ResetPageCommand(main, p, stack)`. Identité de la **liste** de blocs préservée
+  (la liste d'origine est reposée telle quelle à l'annulation, une liste vide réutilisée à chaque
+  réexécution) — les commandes de boîtes antérieures et postérieures dans la pile restent valides
+  sans reconstruction. Garde par **identité de pile** (une pile orpheline après rechargement du
+  projet rend la commande obsolète, rien n'est muté) et par page affichée. État réel suivi par
+  `_applied` ; capture avant mutation, retour arrière sur exception. **Jamais** de `push`/
+  `beginMacro`/`endMacro`/`mark_project_dirty` dans `redo`/`undo`. `in_memory_patches` (cache de
+  pixels) n'est jamais réaffecté.
+- `ui.py` (seul fichier du paquet à importer PySide6, importé uniquement depuis `controller.py`) :
+  `request_reset` — revalidation ; page déjà vierge (lue sur l'état vivant) → message, rien poussé ;
+  **macro ouverte détectée** par `count() > index() and not canRedo()` (fiable à l'index 0, d'après
+  le comportement documenté de `qundostack.cpp` ; contrat figé par test) → forcément orpheline →
+  confirmation explicite (« ne pourra pas être annulée »), revalidation après la modale, message
+  « non annulable » ; sinon validation de l'édition en attente puis push ; focus rendu à la vue s'il
+  était dans un champ de saisie (y compris les combos éditables de taille de police) pour que Cmd+Z
+  fonctionne ; message non modal `MMessage` « Page N (nom) réinitialisée — Annuler (⌘Z)… », raccourci
+  lu dans les réglages et affiché en texte natif.
+- Bouton `MPushButton` (pas `MToolButton`, voir ADR-018 sur les effets graphiques de
+  `MToolButton`) « Réinitialiser », `NoFocus`, placé après `loading` dans l'en-tête ; attaché en fin
+  de `ComicTranslate.__init__` (`attach_page_reset(self)`, après `attach_page_state`) ; le shell
+  expose `main._shell_header_layout` pour ce point d'attache ; absent avec `COMIC_SHELL=0` ou en
+  repli. Actif ssi : les 6 étapes sont actives, la file de tâches est vide (`is_processing_queue` —
+  couvre aussi l'export et l'autosave ; `loading` écarté comme critère, faux positif constaté), pas
+  de lot en cours, pas de mode webtoon, espace de travail et page affichés, pile d'annulation active
+  = pile de la page affichée. Recalcul déclenché par `EnabledChange` des étapes,
+  `undo_group.activeStackChanged` (seul signal fiable après un changement de page asynchrone),
+  `central_stack.currentChanged`, et un chien de garde à 250 ms. Clignote brièvement pendant
+  l'autosave (assumé, pas corrigé).
+
+**Amont touché** : `controller.py` (2 lignes `# fork:` : import + `attach_page_reset(self)`),
+`tests/conftest.py` (1 ligne). Fork déjà en place : `modules/shell/layout.py` expose l'en-tête.
+
+**Tests** : `tests/test_reset.py` (56, hors GUI), `tests/test_reset_ui.py` (46, `--gui`, dont 7
+ajoutés par le tester : aller-retour `.ctpr` réel reset puis reset+annulation, chaîne
+Détecter→Reconnaître→Traduire→Segmenter→Nettoyer→Rendre→Reset→annuler au-delà→rétablir sans
+plantage, écran des réglages et écran vide, pastilles du jalon 1, image de détection sans patchs).
+Suites : 319 passed hors GUI ; `--gui` 487 passed, 3 skipped, 1 failed (`test_app.py`, amont connu).
+
+**Limites connues, assumées** :
+1. **MAJ1** (acceptée par le critic, à corriger par Philippe dans une sous-étape ultérieure,
+   3a-ter) : annuler au-delà d'un reset déjà annulé passe par des items de texte recréés (la scène
+   est reconstruite par `load_image_state`, pas les objets d'origine) ; les commandes antérieures
+   (`TextEditCommand`, `RestoreVersionCommand`, `TextFormatCommand`) visent l'item détruit →
+   `RuntimeError` et l'annulation de la correction échoue (`app/controllers/text.py:477-479`,
+   `modules/history/commands.py:61-63/:89-90`, `app/ui/commands/textformat.py:24`). Défaut
+   préexistant après toute navigation (pas propre au reset), figé par
+   `test_maj1_undo_past_an_undone_reset_targets_recreated_item`. Corriger ce défaut rendra aussi
+   robuste le cas « changer de page puis revenir ».
+2. Invalidation de cache et effacement de l'avertissement « page sautée » : non annulés par
+   Cmd+Z (seul l'état de la page l'est).
+3. Fidélité « navigation » plutôt que « bit à bit » : tracés Z 0,8 → 0 après reset, ordre des
+   bulles qui se chevauchent peut changer.
+4. Annuler écrase toute écriture faite sans passer par une commande après le reset (multi-pages,
+   lot).
+5. Page importée d'un PSD : l'original contient déjà le nettoyage fusionné — un reset ne peut pas
+   le défaire, ce n'est pas une régression du reset lui-même.
+
+**3a-bis, décidée par Philippe le 2026-09-28, à venir** : corriger la macro d'annulation orpheline
+identifiée pendant la conception (défaut amont préexistant, indépendant du reset) : la macro
+« inpaint » (`manual_workflow.py:605`) n'est fermée qu'au succès (`pipeline/inpainting.py:815`),
+idem pour la segmentation ; `endMacro` vise `activeStack()` **à la fin** de l'opération, donc une
+autre page si l'utilisateur a navigué entre-temps → toute commande suivante sur cette pile tombe
+dans une macro jamais fermée et Annuler est refusé jusqu'à la fermeture de l'app.
+
+**Chaîne de conception** : architect → critic pass 1 (« Architect must revise » : B1 câblage des
+signaux sur les items trop tôt, B2 macro évaluée à l'index 0, M1-M9) → décisions de Philippe →
+architect v2 (option C améliorée) → critic pass 2 (« Acceptable to proceed », MAJ1 accepté comme
+limite connue) → décision de Philippe (accepter, corriger MAJ1 dans une sous-étape ultérieure) →
+implementer → tester (OK, 7 tests ajoutés) → validation manuelle de Philippe le 2026-09-28.

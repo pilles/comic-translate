@@ -99,6 +99,14 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   `setCurrentIndex`** : lire `window().focusWidget()` (jamais `QApplication.focusWidget()`, `None`
   hors fenêtre active), rendre le focus au viewer en sortant d'une section, ne jamais en donner à la
   section entrante. Détail : ADR-015.
+- `modules/reset/` — bouton « Réinitialiser » la page (spec 04 jalon 3, sous-étape 3a) : option C
+  améliorée — `commands.py::ResetPageCommand` réécrit les clés traitées d'`image_states[p]`/
+  `image_patches[p]` puis recharge par `image_ctrl.load_image_state(p)` (pas de détachement/
+  rattachement d'items Qt vivants, écarté par le critic). Garde par **identité de pile**
+  (`QUndoStack`) : une pile orpheline après rechargement de projet ne mute rien. **Jamais** de
+  `push`/`beginMacro`/`endMacro`/`mark_project_dirty` dans `redo`/`undo`. `state.py` pur ;
+  `ui.py` seul fichier du paquet à importer PySide6, importé **uniquement** depuis `controller.py`.
+  Détail : ADR-020.
 
 ## Traduction locale (Ollama)
 
@@ -187,6 +195,12 @@ enregistrées avant ce correctif ne sont pas modifiées.
   bug **PySide6/Shiboken6 6.11.2** (`QGraphicsOpacityEffect` créé pendant la dépêche d'un autre
   événement, `dayu_widgets/tool_button.py:57`), pas du fork. Ne se reproduit pas sous
   `.venv/bin/python -m pytest` (voir commande ci-dessus), ni sous `COMIC_SHELL=0`. Détail : ADR-018.
+- Macro d'annulation orpheline après un nettoyage/segmentation en échec ou une navigation pendant
+  l'opération (`endMacro` vise `activeStack()` à la fin, pas la pile de départ) — décidée par
+  Philippe, correction à venir (3a-bis, ADR-020).
+- Annulations de texte (`TextEditCommand`, `RestoreVersionCommand`, `TextFormatCommand`) qui visent
+  un item détruit après navigation ou reset de page → `RuntimeError` à l'annulation (MAJ1) —
+  décidée par Philippe, correction à venir (3a-ter, ADR-020).
 
 ## Mémoire projet
 
