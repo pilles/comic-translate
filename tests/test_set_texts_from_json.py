@@ -79,3 +79,13 @@ def test_two_concatenated_json_objects_returns_none():
     assert result is None
     assert blocks[0].translation == SENTINEL
     assert blocks[1].translation == SENTINEL
+
+
+def test_llm_line_breaks_become_single_spaces():
+    # Cas réel (page 011, 2026-09-27) : le modèle insère un saut de ligne en pleine phrase, que le
+    # rendu respectait ; c'est au rendu de couper selon la largeur de la bulle, jamais au modèle.
+    blocks = _blocks(2)
+    raw = '{"block_0": "LES CONSEILS DE SON PÈRE\\nET VOLÉ TROP PRÈS", "block_1": "  A \\r\\n\\n  B  "}'
+    set_texts_from_json(blocks, raw)
+    assert blocks[0].translation == "LES CONSEILS DE SON PÈRE ET VOLÉ TROP PRÈS"
+    assert blocks[1].translation == "A B"

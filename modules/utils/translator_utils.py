@@ -67,7 +67,10 @@ def set_texts_from_json(blk_list: list[TextBlock], json_string: str) -> dict | N
         for idx, blk in enumerate(blk_list):
             block_key = f"block_{idx}"
             if block_key in translation_dict:
-                blk.translation = translation_dict[block_key]
+                value = translation_dict[block_key]  # fork: sauts de ligne du LLM -> espace (le rendu coupe seul)
+                if isinstance(value, str):  # fork: idem
+                    value = re.sub(r"\s*\n\s*", " ", value).strip()  # fork: idem
+                blk.translation = value  # fork: idem
             else:
                 print(f"Warning: {block_key} not found in JSON string.")
         return translation_dict  # fork: F3
