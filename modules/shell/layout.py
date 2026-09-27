@@ -1,4 +1,4 @@
-"""Coquille de la nouvelle disposition — assemblage (spec 04, jalon 2, sous-étape 2a).
+"""Coquille de la nouvelle disposition — assemblage (spec 04, jalon 2, sous-étapes 2a et 2b).
 
 Point d'attache unique : `build_workspace_shell(main, legacy_content)`, appelé une fois depuis
 `app/ui/main_window/window.py::ComicTranslateUI._init_ui`, juste après la construction du contenu
@@ -218,9 +218,6 @@ def _move_all(main: Any, hierarchy: _Hierarchy, journal: list[_MoveRecord]) -> N
     _move_to_layout(main, journal, "hbutton_group", header)
     _move_to_layout(main, journal, "loading", header)
     header.addStretch()
-    _move_to_layout(main, journal, "webtoon_toggle", header)
-    _move_to_layout(main, journal, "manual_radio", header)
-    _move_to_layout(main, journal, "automatic_radio", header)
     _move_to_layout(main, journal, "translate_button", header)
     _move_to_layout(main, journal, "cancel_button", header)
     _move_to_layout(main, journal, "batch_report_button", header)
@@ -295,6 +292,20 @@ def _park_legacy_content(main: Any, legacy_content: QtWidgets.QWidget) -> None:
     legacy_content.setParent(main)
     legacy_content.hide()
     main._shell_legacy = legacy_content
+
+
+def _hide_parked_widgets(main: Any) -> None:
+    """Masque explicitement les widgets `manifest.PARKED` (spec 04, jalon 2, sous-étape 2b :
+    plus de mode Manuel/Automatique, plus de webtoon). Jamais déplacés par `_move_all` — ils
+    restent enfants du bandeau amont, dans `main._shell_legacy` (succès) ou dans le contenu amont
+    réaffiché (repli, `_build_fallback`). `legacy_content.show()` en repli rendrait visible tout
+    ce qui n'est pas explicitement masqué : appelée après ce `show()` autant qu'après le
+    masquage du succès, pour que ces trois widgets restent invisibles dans les deux cas. Accès
+    défensif (`getattr`) : ne suppose pas que chaque nom existe toujours."""
+    for name in manifest.PARKED:
+        widget = getattr(main, name, None)
+        if isinstance(widget, QtWidgets.QWidget):
+            widget.setVisible(False)
 
 
 def _unlock_text_edit_heights(main: Any) -> None:
@@ -401,6 +412,7 @@ def _finalize(
     main: Any, hierarchy: _Hierarchy, legacy_content: QtWidgets.QWidget
 ) -> QtWidgets.QWidget:
     _park_legacy_content(main, legacy_content)
+    _hide_parked_widgets(main)
     _unlock_text_edit_heights(main)
     _install_badge_wiring(main, hierarchy)
     main._shell_active = True
@@ -424,6 +436,7 @@ def _build_fallback(main: Any, legacy_content: QtWidgets.QWidget, reason: str) -
     legacy_content.setParent(container)
     legacy_content.show()
     layout.addWidget(legacy_content, 1)
+    _hide_parked_widgets(main)
 
     main._shell_active = False
     main._shell_failure = reason
@@ -445,6 +458,11 @@ def build_workspace_shell(main: Any, legacy_content: QtWidgets.QWidget) -> QtWid
     if os.environ.get("COMIC_SHELL") == "0":
         main._shell_active = False
         main._shell_failure = "désactivé par COMIC_SHELL=0"
+        # Le webtoon n'est plus pris en charge (spec 04 §7) : même en mode diagnostic, son
+        # interrupteur reste masqué ; les radios, devenues inoffensives, restent visibles.
+        toggle = getattr(main, "webtoon_toggle", None)
+        if toggle is not None:
+            toggle.setVisible(False)
         return legacy_content
 
     try:

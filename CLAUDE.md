@@ -15,7 +15,8 @@ uv sync                                                    # installe l'environn
 uv run comic.py                                            # lance l'app (GUI)
 COMIC_SHELL=0 uv run comic.py                               # ancienne disposition (diagnostic, ADR-015)
 uv run pytest                                               # tests hors GUI (défaut)
-QT_QPA_PLATFORM=offscreen uv run pytest --gui               # inclut tests/test_app.py
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --gui  # tests GUI ; pas `uv run` : plantage
+                                                             # natif PySide6 intermittent (ADR-018)
 uv run python tools/sync_deps.py --check                    # vérifie pyproject.toml vs requirements.txt
 uv run python tools/bench_translation.py --model translategemma:12b
 uv run python tools/bench_cleaning.py bench/pages --save-blocks bench/out/blocks --out bench/out
@@ -82,13 +83,15 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   purs (déduction pure sur `blk_list`/`image_states`, **aucune écriture, jamais d'ajout d'écriture
   dans ce paquet**), `ui.py` (délégué par composition, seul fichier à importer PySide6). Importé
   uniquement depuis `controller.py`. Détail : ADR-014.
-- `modules/shell/` — nouvelle disposition (spec 04 jalon 2, sous-étape 2a) : reparente les mêmes
-  objets construits par `_create_main_content` (jamais recréés — ~400 lectures de widgets par nom
-  dans les contrôleurs) dans une disposition à 3 colonnes. `manifest.py` (pur, noms d'attributs par
-  zone) **seul fichier à revoir au rebase amont**. Importé uniquement depuis `window.py`,
-  n'importe jamais `app.controllers`/`app.ui.main_window`. Repli visible si le reparentage échoue
-  (`main._shell_active = False`) ; interrupteur `COMIC_SHELL=0` pour l'ancienne disposition sans
-  bandeau. Détail : ADR-015.
+- `modules/shell/` — nouvelle disposition (spec 04 jalon 2, sous-étapes 2a et 2b) : reparente les
+  mêmes objets construits par `_create_main_content` (jamais recréés — ~400 lectures de widgets par
+  nom dans les contrôleurs) dans une disposition à 3 colonnes. `manifest.py` (pur, noms d'attributs
+  par zone) **seul fichier à revoir au rebase amont** ; zone `PARKED` (2b) —
+  `manual_radio`/`automatic_radio`/`webtoon_toggle` — jamais déplacée, masquée sur place
+  (`_hide_parked_widgets`), y compris en repli et sous `COMIC_SHELL=0` (webtoon seulement). Importé
+  uniquement depuis `window.py`, n'importe jamais `app.controllers`/`app.ui.main_window`. Repli
+  visible si le reparentage échoue (`main._shell_active = False`) ; interrupteur `COMIC_SHELL=0`
+  pour l'ancienne disposition sans bandeau. Détail : ADR-015.
 
 ## Traduction locale (Ollama)
 
@@ -120,6 +123,13 @@ Toute analyse du texte de la page (détection, OCR, segmentation, traduction) li
 l'image avec patchs — il peint par-dessus des patchs déjà posés (ADR-016). Piège rencontré :
 `app/controllers/manual_workflow.py` a des fins de ligne mixtes (CRLF/CR/LF) — l'éditer en octets,
 sinon tout le fichier apparaît modifié dans le diff.
+
+## Règle « le modèle de traduction ne coupe jamais les lignes »
+
+`set_texts_from_json` (`modules/utils/translator_utils.py`) remplace tout saut de ligne renvoyé
+par le modèle par une espace avant d'écrire `blk.translation` — c'est au rendu de couper le texte
+selon la largeur de la bulle, jamais au modèle (hotfix `566740b`, ADR-017). Les traductions déjà
+enregistrées avant ce correctif ne sont pas modifiées.
 
 ## Interdits
 
@@ -161,6 +171,10 @@ sinon tout le fichier apparaît modifié dans le diff.
 - Page insérée puis traitée par lot : `viewer.load_state` lève `KeyError` sur `state['rectangles']`
   au chargement suivant (`viewer_state` incomplet laissé par le lot, ADR-014, touchera le jalon 4
   de la spec 04).
+- Plantage natif intermittent (`Fatal Python error: Segmentation fault`) dans les tests de lot :
+  bug **PySide6/Shiboken6 6.11.2** (`QGraphicsOpacityEffect` créé pendant la dépêche d'un autre
+  événement, `dayu_widgets/tool_button.py:57`), pas du fork. Ne se reproduit pas sous
+  `.venv/bin/python -m pytest` (voir commande ci-dessus), ni sous `COMIC_SHELL=0`. Détail : ADR-018.
 
 ## Mémoire projet
 

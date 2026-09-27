@@ -1275,6 +1275,7 @@ class ProjectController:
         save_state_to_proj_file(self.main, file_name)
 
     def update_ui_from_project(self):
+        self.main.webtoon_mode = False  # fork: webtoon non pris en charge (spec 04, §7)
         for state in self.main.image_states.values():
             if not isinstance(state, dict):
                 continue

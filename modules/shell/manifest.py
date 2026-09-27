@@ -15,8 +15,11 @@ Chaque nom apparaît dans exactement une zone (`tests/test_shell.py` le vérifie
 - PAGE / BUBBLE : section provisoire du panneau de droite (pas encore une pile Page/Bulle en 2a,
   voir `modules/shell/panel.py`).
 - RENDER / TOOLS : les deux groupes du bas du panneau de droite.
-- PARKED : rangé hors du flux visible (vide en 2a — en 2b, `manual_radio`/`automatic_radio`/
-  `webtoon_toggle` y déménageront depuis HEADER).
+- PARKED : rangé hors du flux visible, masqué explicitement (`setVisible(False)`, y compris en
+  repli) — `manual_radio`/`automatic_radio`/`webtoon_toggle` (spec 04, jalon 2, sous-étape 2b :
+  plus de mode Manuel/Automatique, plus de webtoon dans la nouvelle interface). Jamais déplacés
+  (retirés de `HEADER`), jamais détruits : lus par `app/controllers/projects.py`,
+  `controller.py`, `modules/view/original.py`, `app/controllers/webtoons.py`.
 - EXTERNAL : jamais déplacé par le shell — `window.py` reparente lui-même ce widget dans la barre
   de titre, immédiatement après l'appel à `build_workspace_shell`."""
 
@@ -25,9 +28,6 @@ from __future__ import annotations
 HEADER: tuple[str, ...] = (
     "hbutton_group",
     "loading",
-    "manual_radio",
-    "automatic_radio",
-    "webtoon_toggle",
     "translate_button",
     "cancel_button",
     "batch_report_button",
@@ -74,12 +74,12 @@ TOOLS: tuple[str, ...] = (
     "brush_eraser_slider",
 )
 
-PARKED: tuple[str, ...] = ()
+PARKED: tuple[str, ...] = ("manual_radio", "automatic_radio", "webtoon_toggle")
 
 EXTERNAL: tuple[str, ...] = ("undo_tool_group",)
 
-# Zones déplacées par le shell (validées, journalisées, reparentées) — tout sauf PARKED (vide en
-# 2a, rien à déplacer) et EXTERNAL (jamais touché par le shell).
+# Zones déplacées par le shell (validées, journalisées, reparentées) — tout sauf PARKED (jamais
+# déplacé, masqué sur place) et EXTERNAL (jamais touché par le shell).
 MOVED_ZONES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("HEADER", HEADER),
     ("PROGRESS", PROGRESS),

@@ -179,6 +179,27 @@ projet. Rien de neuf, rien de cassé.
 > la page sur l'image d'origine plutôt que sur l'image nettoyée, ADR-016) — il supprimait un piège
 > qui gênait tous les tests manuels de la nouvelle disposition (blocs remplacés par zéro après un
 > cycle Détecter/Nettoyer/Détecter).
+>
+> **2b livrée le 2026-09-27.** `manual_radio`/`automatic_radio`/`webtoon_toggle` passés en zone
+> `PARKED` (`modules/shell/manifest.py`), masqués sur place (`_hide_parked_widgets`, y compris en
+> repli) plutôt que déplacés ; sous `COMIC_SHELL=0`, seul `webtoon_toggle` est masqué. `controller.py`
+> (6 lignes `# fork:`) : `batch_mode_selected`/`manual_mode_selected` rendent le même état de repos
+> quel que soit `main_page/mode` ; étapes grisées pendant un lot, réactivées et Cancel regrisé à la
+> fin. `app/controllers/projects.py` (1 ligne `# fork:`) : `webtoon_mode = False` forcé au chargement
+> d'un projet. ~19 tests ajoutés à `tests/test_shell_ui.py`. Suites : 248 passed hors GUI ; `--gui`
+> 346 passed, 3 skipped, 1 failed (`test_app.py`, amont connu). Détail : ADR-015 (amendement),
+> `specs/decisions.md`.
+>
+> **2b-bis : décidée (corriger), livraison à venir.** Philippe a tranché le 2026-09-27 : corriger le
+> défaut amont n°3 (ADR-014, `_batch_active` bloqué à `True`) par 3 lignes dans `task_runner.py`,
+> garde-fou « ne jamais se déclencher pendant l'exécution d'un lot », comparaison du rappel par
+> `==`. Pas encore livré, commit séparé à venir.
+>
+> **2c inchangée** (pile Page/Bulle, règle de focus).
+>
+> **Plantage natif rencontré pendant les tests de la 2b** (sans rapport avec le shell) : voir
+> ADR-018 — bug PySide6/Shiboken6 6.11.2, pas du fork ; consigne de lancement des tests `--gui`
+> mise à jour dans `CLAUDE.md`.
 
 ### Jalon 3 — Action unique et retours explicites
 

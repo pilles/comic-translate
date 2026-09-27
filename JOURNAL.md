@@ -1,5 +1,47 @@
 # JOURNAL
 
+## 2026-09-27 (second passage) — Spec 04 jalon 2 (2b), hotfix sauts de ligne, plantage natif PySide6
+
+- **Hotfix commité (`566740b`)** : retours à la ligne renvoyés par le modèle de traduction. Cas réel
+  page 011, texte anglais reconnu sur une ligne, `translategemma` renvoie « … DE SON PÈRE\nET VOLÉ
+  … », le rendu respectait le saut de ligne en pleine phrase. `set_texts_from_json`
+  (`modules/utils/translator_utils.py`) remplace désormais tout saut de ligne (et les blancs autour)
+  par une espace, 4 lignes `# fork:`, test `tests/test_set_texts_from_json.py::
+  test_llm_line_breaks_become_single_spaces`. Traductions déjà enregistrées non modifiées. Règle :
+  au rendu de couper selon la largeur de la bulle, jamais au modèle. Détail : ADR-017
+  (`specs/decisions.md`).
+- **Spec 04 jalon 2, sous-étape 2b (livrée, non commitée)** : `modules/shell/manifest.py` —
+  `manual_radio`/`automatic_radio`/`webtoon_toggle` passés de `HEADER` à `PARKED` ; `layout.py` ne
+  les déplace plus, `_hide_parked_widgets(main)` les masque dans `_finalize` et dans le repli (sous
+  `COMIC_SHELL=0`, seul `webtoon_toggle` masqué). `controller.py` (6 lignes `# fork:`) :
+  `batch_mode_selected`/`manual_mode_selected` rendent le même état de repos (6 étapes + Translate
+  All actifs, Cancel grisé) quel que soit `main_page/mode` ; `_run_batch_for_paths` grise les étapes
+  pendant le lot, `on_batch_process_finished` les réactive et regrise Cancel. `app/controllers/
+  projects.py` (1 ligne `# fork:`) : `webtoon_mode = False` en tête de `update_ui_from_project`
+  (webtoon non pris en charge, pas de conversion ; un `.ctpr` webtoon peut lever `KeyError`,
+  `image_viewer.py:546`). ~19 tests ajoutés à `tests/test_shell_ui.py` (widgets parqués, fonctions de
+  mode neutres, lot factice, `COMIC_SHELL=0`, etc.). Suites : 248 passed hors GUI ; `--gui` 346
+  passed, 3 skipped, 1 failed (`test_app.py`, amont connu). **2b-bis décidée par Philippe** :
+  corriger le défaut amont n°3 (ADR-014, `_batch_active` bloqué à `True`) par 3 lignes dans
+  `task_runner.py` (garde-fou : ne jamais se déclencher pendant l'exécution d'un lot, comparaison du
+  rappel par `==`) — livraison à venir, commit séparé. Détail : ADR-015 (amendement),
+  `specs/04-refonte-interface.md` §5 jalon 2.
+- **Plantage natif dans les tests — enquête close** : `Fatal Python error: Segmentation fault`
+  intermittent dans les tests de lot de `tests/test_shell_ui.py`, pile Python
+  `dayu_widgets/tool_button.py:57` (`MToolButton.changeEvent` crée un `QGraphicsOpacityEffect`) ←
+  `controller.py` (`save_as_project_button.setEnabled(False)`). 4 rapports natifs identiques
+  (`~/Library/Logs/DiagnosticReports/python3.12-*.ips`) : plantage dans
+  `PySide::SignalManager::retrieveMetaObject` — **bug de PySide6/Shiboken6 6.11.2**, pas du fork ni
+  de `dayu_widgets`. Mesures : `uv run pytest` ≈ 17 % d'échec (11/65) ; `.venv/bin/python -m pytest`
+  0/30 ; un seul test par processus 0/35 ; 15 rejouées dans un même processus 0/60 ; `COMIC_SHELL=0`
+  0/65. Application réelle jugée peu probable (une seule fenêtre par lancement), non formellement
+  exclue. **Décision : pas de correctif applicatif**, consigne de lancement `QT_QPA_PLATFORM=offscreen
+  .venv/bin/python -m pytest --gui` ajoutée à `CLAUDE.md`, candidat à signaler à PySide6 si
+  reproductible hors fork. Détail : ADR-018 (`specs/decisions.md`).
+- Reste à faire : commit du hotfix ADR-017 (déjà fait, `566740b`) et des deux lots 2b/plantage natif
+  (non commités à cette date), livraison de 2b-bis (`task_runner.py`), test manuel de Philippe sur
+  2a/2b, démarrage de 2c.
+
 ## 2026-09-27 — Spec 04 jalon 2 (2a) : nouvelle disposition, hotfix analyse sur l'original
 
 - **Nouvelle disposition (2a)** : `modules/shell/` (nouveau paquet) reparente les mêmes objets

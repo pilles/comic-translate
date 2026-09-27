@@ -767,6 +767,25 @@ widgets déplacés, identité des widgets, hauteur des champs ≥ 120 px à 1225
 - « Source jamais vidée » (annotation 4 de la maquette) : **reporté**, défauts amont
   (`image.py:1131`, `text.py:929`, `rect_item.py:62-63`) non corrigés.
 
+**Amendement 2026-09-27 — sous-étape 2b livrée** : parcage effectif de `manual_radio`,
+`automatic_radio`, `webtoon_toggle` (zone `PARKED` de `manifest.py`, vide en 2a, peuplée en 2b) —
+`layout.py` ne les déplace plus, `_hide_parked_widgets(main)` les masque dans `_finalize` et dans
+le repli ; sous `COMIC_SHELL=0`, seul `webtoon_toggle` est masqué (les radios, devenues inoffensives
+une fois `controller.py` neutralisé, restent visibles). `controller.py` (6 lignes `# fork:`) :
+`batch_mode_selected` et `manual_mode_selected` produisent désormais le même état de repos (6
+étapes + Translate All actifs, Cancel grisé) quel que soit le réglage QSettings `main_page/mode` ;
+`_run_batch_for_paths` grise les étapes pendant le lot, `on_batch_process_finished` les réactive et
+regrise Cancel. `app/controllers/projects.py` (1 ligne `# fork:`) : `self.main.webtoon_mode = False`
+en tête de `update_ui_from_project` (chargement normal et récupération) — le webtoon n'étant pas
+pris en charge, un `.ctpr` webtoon peut lever `KeyError` (`image_viewer.py:546`), non corrigé.
+Tests : ~19 ajoutés à `tests/test_shell_ui.py` (widgets parqués masqués/vivants/sous
+`_shell_legacy`, fonctions de mode neutres, lot factice avec état de repos avant/pendant/après,
+`cancel_current_task`, démarrage identique quel que soit `main_page/mode`, `COMIC_SHELL=0` ne masque
+que l'interrupteur webtoon). Suites : 248 passed hors GUI ; `--gui` 346 passed, 3 skipped, 1 failed
+(`test_app.py`, amont connu). **2b-bis** (correctif du défaut amont n°3 de l'ADR-014,
+`task_runner.py`) décidée par Philippe le 2026-09-27, livraison à venir (commit séparé) — garde-fou :
+ne jamais se déclencher pendant l'exécution d'un lot, comparaison du rappel par `==`.
+
 ## ADR-016 — Analyse du texte sur l'image d'origine (hotfix)
 
 Date : 2026-09-27
@@ -809,3 +828,59 @@ connu).
 **Conséquences** : règle ajoutée à `CLAUDE.md` — toute analyse du texte de la page (détection,
 OCR, segmentation, traduction) lit `get_image_array(include_patches=False)` ; seul le nettoyage
 lit l'image avec patchs.
+
+## ADR-017 — Sauts de ligne du modèle de traduction remplacés par des espaces (hotfix)
+
+Date : 2026-09-27
+Statut : Adoptée (hotfix, commit `566740b`)
+
+**Contexte** : cas réel page 011 de l'album de test — texte anglais reconnu sur une seule ligne,
+`translategemma` renvoie une traduction avec un saut de ligne en pleine phrase (« … DE SON PÈRE\nET
+VOLÉ … ») ; le rendu respectait ce saut de ligne, coupant la bulle à un endroit arbitraire choisi
+par le modèle plutôt que par la largeur réelle de la bulle.
+
+**Décision** : `set_texts_from_json` (`modules/utils/translator_utils.py`) remplace tout saut de
+ligne (et les blancs autour, `\r`/`\n` compris) par une espace unique avant d'écrire
+`blk.translation` (`re.sub(r"\s*\n\s*", " ", value).strip()`). 4 lignes `# fork:`. Règle : c'est au
+rendu de couper le texte selon la largeur de la bulle, jamais au modèle de traduction.
+
+**Conséquences** : les traductions déjà enregistrées dans des projets existants ne sont pas
+modifiées rétroactivement — seules les traductions produites après ce correctif en bénéficient.
+Test : `tests/test_set_texts_from_json.py::test_llm_line_breaks_become_single_spaces`.
+
+## ADR-018 — Plantage natif PySide6/Shiboken6 dans les tests de lot : pas de correctif applicatif
+
+Date : 2026-09-27
+Statut : Constatée, non corrigée (défaut de bibliothèque tierce, pas du fork)
+
+**Contexte** : `Fatal Python error: Segmentation fault` intermittent dans les tests de lot de
+`tests/test_shell_ui.py` (sous-étape 2b). Pile Python : `app/ui/dayu_widgets/tool_button.py:57`
+(`MToolButton.changeEvent` crée un `QGraphicsOpacityEffect` en passant à l'état grisé) déclenché par
+`controller.py` (`save_as_project_button.setEnabled(False)`, bouton de la barre de navigation amont,
+non déplacé par le shell).
+
+**Preuve native** : 4 rapports identiques (`~/Library/Logs/DiagnosticReports/python3.12-*.ips`),
+plantage dans `PySide::SignalManager::retrieveMetaObject` ← `Sbk_QGraphicsOpacityEffect_Init` ←
+`changeEvent` ← `QWidgetPrivate::setEnabled_helper` — construction d'un `QObject` pendant la dépêche
+d'un autre événement. Bug de **PySide6/Shiboken6 6.11.2**, pas du fork ni de `dayu_widgets`.
+
+**Mesures** : `uv run pytest` sur les 4 tests de lot ≈ 17 % d'échec (11/65) ; `.venv/bin/python -m
+pytest` 0/30 échec ; un seul test par processus 0/35 ; 15 tests rejoués dans un même processus
+0/60 ; `COMIC_SHELL=0` 0/65. La nouvelle disposition (2a/2b) augmente la probabilité d'apparition
+(ordre de construction des widgets) sans en être la cause. Hypothèse « préchauffer l'effet dans le
+shell » testée puis retirée : aucun effet mesuré (5/40). Hypothèse initiale (interrupteur webtoon
+masqué) fausse et abandonnée, `controller.py` non modifié pour elle.
+
+**Décision** : pas de correctif applicatif — c'est un défaut de PySide6/Shiboken6, pas du code du
+fork. Consigne de lancement : `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest --gui` plutôt
+que `uv run pytest --gui` (réduit l'échec à 0 sur les mesures faites). Candidat à signaler en amont
+de PySide6 si reproductible hors fork. `lldb` inutilisable ici (« Not allowed to attach », macOS) —
+les rapports du crash reporter système ont suffi au diagnostic.
+
+**Conséquences assumées** :
+- Application réelle jugée **peu probable** (une seule fenêtre par lancement ; le plantage n'a été
+  observé qu'avec plusieurs instances de fenêtre créées/détruites dans le même processus, comme le
+  fait `qtbot` dans les tests) — non formellement exclu, à surveiller si un plantage similaire
+  apparaît un jour en usage réel.
+- `test_pagestate_ui.py::test_watchdog_tick_median_cost_under_one_millisecond` peut échouer sous
+  charge (mesure de temps CPU), passe isolé — sans rapport avec ce défaut, à ne pas confondre.

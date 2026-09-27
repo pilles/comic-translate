@@ -470,13 +470,13 @@ class ComicTranslate(ComicTranslateUI):
                 stack.endMacro()
 
     def batch_mode_selected(self):
-        self.disable_hbutton_group()
+        self.enable_hbutton_group()  # fork: plus de mode Automatique (spec 04, jalon 2, 2b)
         self.translate_button.setEnabled(True)
-        self.cancel_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)  # fork: Cancel grisé au repos (spec 04, jalon 2, 2b)
 
     def manual_mode_selected(self):
         self.enable_hbutton_group()
-        self.translate_button.setEnabled(False)
+        self.translate_button.setEnabled(True)  # fork: plus de mode Manuel (spec 04, jalon 2, 2b)
         self.cancel_button.setEnabled(False)
 
     def on_manual_finished(self):
@@ -648,6 +648,7 @@ class ComicTranslate(ComicTranslateUI):
         if self.manual_radio.isChecked():
             self.automatic_radio.setChecked(True)
             self.batch_mode_selected()
+        self.disable_hbutton_group()  # fork: étapes grisées pendant le lot (spec 04, jalon 2, 2b)
         self._batch_active = True
         self._batch_cancel_requested = False
         self.translate_button.setEnabled(False)
@@ -699,7 +700,8 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_cancel_requested = False
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
-        self.cancel_button.setEnabled(True)
+        self.enable_hbutton_group()  # fork: étapes réactivées en fin de lot (spec 04, jalon 2, 2b)
+        self.cancel_button.setEnabled(False)  # fork: Cancel grisé au repos (spec 04, jalon 2, 2b)
         self.save_as_project_button.setEnabled(True)
         self.webtoon_toggle.setEnabled(True)
         self.selected_batch = []

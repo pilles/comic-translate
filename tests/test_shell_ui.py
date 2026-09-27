@@ -8,19 +8,37 @@ d'environnement sur la géométrie du viewport sous le pilote `offscreen`, badge
 
 from __future__ import annotations
 
+import inspect
+import re
+
 import numpy as np
 import pytest
 from PySide6 import QtWidgets
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QUndoCommand, QUndoStack
 
+import app.controllers.projects as projects_module
+import controller as controller_module
 import modules.shell.layout as shell_layout_module
 import modules.shell.manifest as manifest
 import modules.view.original as original_module
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.dayu_widgets.alert import MAlert
 from app.ui.main_window import ComicTranslateUI
+from app.ui.messages import Messages
 from modules.history.ui import _BUTTON_TOOLTIP
+
+
+def _count_expected_moves() -> int:
+    """Nombre d'appels `_move_to_layout`/`_move_as_overlay_child` dans le corps de `_move_all`,
+    obtenu par introspection statique du code source plutôt qu'une constante recopiée à la main
+    (revérif tester, sous-étape 2b, point 7) : chaque appel journalise exactement un `_locate`, ce
+    total est donc aussi le dernier index valide pour `fail_at` dans
+    `test_rollback_restores_original_legacy_layout_order` — se met à jour automatiquement si
+    `_move_all` gagne ou perd des déplacements."""
+    source = inspect.getsource(shell_layout_module._move_all)
+    return len(re.findall(r"_move_to_layout\(|_move_as_overlay_child\(", source))
+
 
 _PHOTO_WIDTH = 160
 _PHOTO_HEIGHT = 120
@@ -146,13 +164,150 @@ def test_comic_translate_ui_alone_builds_shell_without_controllers(qtbot):
     assert widget._shell_failure is None
 
 
+# --- PARKED : radios Manuel/Automatique et interrupteur webtoon (spec 04, jalon 2, 2b) ---------
+#
+# Plus de mode Manuel/Automatique, plus de webtoon (§3, §7) : les trois widgets restent vivants
+# dans `main._shell_legacy` (lus par `app/controllers/projects.py`, `controller.py`,
+# `modules/view/original.py`, `app/controllers/webtoons.py`) mais ne doivent plus jamais
+# apparaître, y compris quand le repli affiche l'ancien contenu (`legacy_content.show()`).
+
+
+def test_parked_widgets_hidden_alive_and_still_under_legacy(main):
+    for name in manifest.PARKED:
+        widget = getattr(main, name)
+        assert isinstance(widget, QtWidgets.QWidget)
+        assert widget.isVisibleTo(main) is False
+        assert main._shell_legacy.isAncestorOf(widget), f"{name} hors de l'ancien contenu"
+        # Vivant côté Qt : `objectName()` ne lève pas `RuntimeError` (widget détruit).
+        widget.objectName()
+
+
+def test_parked_widgets_stay_hidden_in_fallback(qtbot, monkeypatch):
+    """Repli simulé (nom de manifeste inexistant, même recette que
+    `test_unknown_manifest_name_falls_back_to_intact_legacy_layout`) : `legacy_content.show()`
+    rendrait les trois widgets visibles s'ils n'étaient pas masqués explicitement — c'est
+    exactement ce que ce test prouve."""
+    monkeypatch.setattr(
+        manifest,
+        "ALL_ZONES",
+        manifest.ALL_ZONES + (("BOGUS", ("nonexistent_widget_xyz",)),),
+    )
+
+    widget = ComicTranslateUI()
+    qtbot.addWidget(widget)
+
+    assert widget._shell_active is False
+    for name in manifest.PARKED:
+        parked_widget = getattr(widget, name)
+        assert parked_widget.isVisibleTo(widget) is False
+
+
+# --- Fonctions de mode neutres : plus de mode Manuel/Automatique (spec 04, jalon 2, 2b) ---------
+#
+# Quel que soit l'ancien réglage QSettings `main_page/mode`, l'état au repos est désormais
+# identique quelle que soit la fonction appelée : 6 étapes actives, Translate All actif, Cancel
+# grisé (`controller.py:472-480`).
+
+
+def _assert_resting_state(main) -> None:
+    for button in main.hbutton_group.get_button_group().buttons():
+        assert button.isEnabled() is True
+    assert main.translate_button.isEnabled() is True
+    assert main.cancel_button.isEnabled() is False
+
+
+def test_batch_mode_selected_reaches_resting_state(main):
+    main.batch_mode_selected()
+    _assert_resting_state(main)
+
+
+def test_manual_mode_selected_reaches_resting_state(main):
+    main.manual_mode_selected()
+    _assert_resting_state(main)
+
+
+# --- Lot factice : étapes grisées pendant, réactivées à la fin (spec 04, jalon 2, 2b) -----------
+
+_FAKE_BATCH_PAGE = "fake_page_01.png"
+
+
+def _neutralize_batch_side_effects(main, monkeypatch) -> None:
+    """Neutralise tout ce que `_run_batch_for_paths`/`on_batch_process_finished` déclencheraient
+    réellement (réglages, modèles, autosave, boîtes de dialogue) : seul l'état des boutons de
+    `controller.py` nous intéresse ici. `run_threaded` est remplacé par un no-op (pas même un
+    appel synchrone du callback) pour figer l'état « pendant le lot » de façon déterministe —
+    `on_batch_process_finished` est ensuite appelé directement par le test qui en a besoin,
+    plutôt que d'attendre un signal de fin de thread réel."""
+    monkeypatch.setattr(controller_module, "validate_settings", lambda *a, **k: True)
+    monkeypatch.setattr(main.pipeline, "batch_process", lambda *a, **k: None)
+    monkeypatch.setattr(main.pipeline, "webtoon_batch_process", lambda *a, **k: None)
+    monkeypatch.setattr(main.pipeline, "release_model_caches", lambda *a, **k: None)
+    monkeypatch.setattr(main, "run_threaded", lambda *a, **k: None)
+    monkeypatch.setattr(main.project_ctrl, "autosave_project", lambda *a, **k: None)
+    monkeypatch.setattr(Messages, "show_translation_complete", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(Messages, "show_batch_skipped_summary", staticmethod(lambda *a, **k: None))
+    main.image_files = [_FAKE_BATCH_PAGE]
+    main.image_states = {_FAKE_BATCH_PAGE: {"source_lang": "English", "target_lang": "English"}}
+
+
+def test_batch_run_disables_steps_enables_cancel_disables_translate(main, monkeypatch):
+    _neutralize_batch_side_effects(main, monkeypatch)
+
+    main._run_batch_for_paths([_FAKE_BATCH_PAGE])
+
+    for button in main.hbutton_group.get_button_group().buttons():
+        assert button.isEnabled() is False
+    assert main.translate_button.isEnabled() is False
+    assert main.cancel_button.isEnabled() is True
+
+
+def test_batch_finished_reenables_steps_translate_disables_cancel(main, monkeypatch):
+    _neutralize_batch_side_effects(main, monkeypatch)
+    main._run_batch_for_paths([_FAKE_BATCH_PAGE])
+
+    main.on_batch_process_finished()
+
+    for button in main.hbutton_group.get_button_group().buttons():
+        assert button.isEnabled() is True
+    assert main.translate_button.isEnabled() is True
+    assert main.cancel_button.isEnabled() is False
+
+
+# --- Webtoon non pris en charge : `update_ui_from_project` remet `webtoon_mode` à False ---------
+#
+# Aucun `.ctpr` webtoon réel disponible (tranché le 2026-09-25, spec 04 §7) : la fixture `main`
+# fraîche n'a aucun projet chargé (`image_files` vide), si bien que `update_ui_from_project`
+# s'arrête après la remise à `False` de `webtoon_mode` (branche de retour anticipé, aucune image à
+# charger) — suffisant pour prouver que la ligne `# fork:` s'exécute avant tout le reste, sans
+# construire un projet complet.
+
+
+def test_update_ui_from_project_resets_webtoon_mode(main):
+    main.webtoon_mode = True
+    assert not main.image_files  # précondition : fixture fraîche, aucun projet chargé
+
+    main.project_ctrl.update_ui_from_project()
+
+    assert main.webtoon_mode is False
+
+
 # --- Garde de couverture : aucun widget interactif oublié dans l'ancien contenu --------------
 
 
-def _collect_interactive_offenders(legacy: QtWidgets.QWidget) -> list[str]:
+def _collect_interactive_offenders(main) -> list[str]:
     """Même scan que la garde de couverture réelle (`test_legacy_content_has_no_remaining_interactive_widget`),
     factorisé pour être réutilisé par `test_legacy_content_guard_catches_an_unlisted_injected_button`
-    (preuve que la garde mord)."""
+    (preuve que la garde mord). Depuis la sous-étape 2b, `manifest.PARKED`
+    (`manual_radio`/`automatic_radio`/`webtoon_toggle`) reste dans l'ancien contenu par
+    construction (jamais déplacé) : seule exception acceptée en plus de `QScrollBar`, identifiée
+    par identité (pas par type, trop large) pour que la garde continue de mordre sur tout
+    widget interactif non listé."""
+    legacy = main._shell_legacy
+    parked_ids = {
+        id(widget)
+        for widget in (getattr(main, name, None) for name in manifest.PARKED)
+        if isinstance(widget, QtWidgets.QWidget)
+    }
     offenders = []
     for widget in legacy.findChildren(QtWidgets.QWidget):
         if not isinstance(widget, _INTERACTIVE_TYPES):
@@ -161,6 +316,10 @@ def _collect_interactive_offenders(legacy: QtWidgets.QWidget) -> list[str]:
             # Exception documentée : barre interne d'un `QAbstractScrollArea` resté dans
             # l'ancien contenu (`tools_scroll`, `workspace.py:369` — ses widgets internes ont
             # été extraits un par un, le conteneur défilant lui-même n'est pas déplacé).
+            continue
+        if id(widget) in parked_ids:
+            # Exception documentée : `manifest.PARKED` (spec 04, jalon 2, 2b) — masqué
+            # explicitement (`setVisible(False)`), jamais déplacé, jamais détruit.
             continue
         parents = []
         parent = widget.parentWidget()
@@ -174,7 +333,7 @@ def _collect_interactive_offenders(legacy: QtWidgets.QWidget) -> list[str]:
 
 
 def test_legacy_content_has_no_remaining_interactive_widget(main):
-    offenders = _collect_interactive_offenders(main._shell_legacy)
+    offenders = _collect_interactive_offenders(main)
     assert not offenders, "widgets interactifs oubliés dans l'ancien contenu :\n" + "\n".join(
         offenders
     )
@@ -205,7 +364,7 @@ def test_legacy_content_guard_catches_an_unlisted_injected_button(qtbot, monkeyp
     qtbot.addWidget(widget)
 
     assert widget._shell_active is True
-    offenders = _collect_interactive_offenders(widget._shell_legacy)
+    offenders = _collect_interactive_offenders(widget)
     assert any(_INJECTED_BUTTON_OBJECT_NAME in offender for offender in offenders), offenders
 
 
@@ -251,7 +410,7 @@ def _build_baseline_legacy_content(qtbot, monkeypatch) -> QtWidgets.QWidget:
     return widget.main_content_widget
 
 
-@pytest.mark.parametrize("fail_at", [1, 10, 25, 42])
+@pytest.mark.parametrize("fail_at", [1, 10, 25, _count_expected_moves()])
 def test_rollback_restores_original_legacy_layout_order(qtbot, monkeypatch, fail_at):
     baseline_content = _build_baseline_legacy_content(qtbot, monkeypatch)
     baseline_snapshot = _snapshot(baseline_content)
@@ -652,3 +811,225 @@ def test_text_controller_widgets_to_block_are_the_shell_moved_instances(main):
     assert [id(w) for w in main.text_ctrl.widgets_to_block] == [id(w) for w in expected]
     for widget in expected:
         assert main.main_content_widget.isAncestorOf(widget)
+
+
+# --- Chemins qui réactivent les étapes ou Cancel (revérif tester, sous-étape 2b, point 1) -------
+#
+# `default_error_handler` réactive `hbutton_group` mais ne touche ni `translate_button` ni
+# `cancel_button` : lors d'un lot, c'est `on_batch_process_finished` (câblé comme
+# `finished_callback` de `run_threaded`, toujours invoqué après `error_callback` — voir
+# `app/controllers/task_runner.py::_process_next_operation`, les deux signaux sont émis dans le
+# `try`/`finally` de `GenericWorker.run`) qui referme l'état sur les trois boutons. Ce test le
+# prouve en appelant les deux callbacks dans cet ordre, sans thread réel, exactement comme le
+# ferait `run_threaded` en cas d'échec.
+
+
+def test_default_error_handler_then_batch_finished_reaches_resting_state(main, monkeypatch):
+    _neutralize_batch_side_effects(main, monkeypatch)
+    # `default_error_handler`, branche générique, ouvrirait sinon une vraie boîte de dialogue
+    # modale (`Messages.show_error_with_copy` → `QMessageBox.exec()`) : bloquerait indéfiniment
+    # sous le pilote `offscreen` (aucun utilisateur pour cliquer OK).
+    monkeypatch.setattr(Messages, "show_error_with_copy", staticmethod(lambda *a, **k: None))
+    main._run_batch_for_paths([_FAKE_BATCH_PAGE])
+
+    # État "pendant le lot", juste avant l'échec : Cancel actif, étapes/Translate grisés.
+    assert main.cancel_button.isEnabled() is True
+
+    main.default_error_handler((RuntimeError, RuntimeError("échec simulé"), ""))
+    # `default_error_handler` seul ne referme pas tout : Cancel reste actif, Translate grisé.
+    # C'est `on_batch_process_finished`, appelé juste après par le vrai worker, qui referme.
+    assert main.cancel_button.isEnabled() is True
+    assert main.translate_button.isEnabled() is False
+
+    main.on_batch_process_finished()
+    _assert_resting_state(main)
+
+
+def test_cancel_current_task_disables_cancel_only_while_batch_active(main, monkeypatch):
+    """`task_runner.cancel_current_task` (`app/controllers/task_runner.py:144-156`) grise Cancel
+    seulement si `_batch_active` est vrai ; hors lot, il ne doit toucher à rien (pas de bouton à
+    regriser puisqu'aucun n'est actif)."""
+    main.cancel_current_task()
+    assert main.cancel_button.isEnabled() is False  # déjà grisé au repos, inchangé
+
+    _neutralize_batch_side_effects(main, monkeypatch)
+    main._run_batch_for_paths([_FAKE_BATCH_PAGE])
+    assert main.cancel_button.isEnabled() is True
+
+    main.cancel_current_task()
+    assert main.cancel_button.isEnabled() is False
+    assert main._batch_cancel_requested is True
+
+
+def test_retry_skipped_batch_images_reaches_same_states_as_a_normal_batch(main, monkeypatch):
+    """`retry_skipped_batch_images` retombe sur `_run_batch_for_paths` : mêmes états de boutons
+    qu'un lot normal, pas de chemin de réactivation différent."""
+    _neutralize_batch_side_effects(main, monkeypatch)
+    main.batch_report_ctrl._latest_batch_report = {
+        "skipped_entries": [{"image_path": _FAKE_BATCH_PAGE}],
+    }
+
+    main.retry_skipped_batch_images()
+
+    for button in main.hbutton_group.get_button_group().buttons():
+        assert button.isEnabled() is False
+    assert main.translate_button.isEnabled() is False
+    assert main.cancel_button.isEnabled() is True
+
+    main.on_batch_process_finished()
+    _assert_resting_state(main)
+
+
+# --- Pendant une opération manuelle, Cancel reste grisé (revérif tester, point 2) ---------------
+
+
+def test_manual_workflow_never_touches_cancel_button(main):
+    """`app/controllers/manual_workflow.py` grise `hbutton_group` à plusieurs endroits mais ne
+    référence jamais `cancel_button` (grep, revérifié ici par introspection du module plutôt que
+    par une liste figée de noms de fonctions, pour ne pas se démoder si le fichier est réorganisé) :
+    Cancel reste sous le seul contrôle du chemin lot (`_run_batch_for_paths`/
+    `on_batch_process_finished`/`cancel_current_task`)."""
+    import app.controllers.manual_workflow as manual_workflow_module
+
+    source = inspect.getsource(manual_workflow_module)
+    assert "cancel_button" not in source
+
+
+def test_block_detect_disables_hbutton_group_without_enabling_cancel(main, monkeypatch):
+    """Exercice concret d'une opération manuelle (`block_detect`, point d'entrée le plus simple de
+    `manual_workflow.py`) : `disable_hbutton_group()` grise les étapes, Cancel reste tel quel
+    (grisé au repos)."""
+    monkeypatch.setattr(main.pipeline, "detect_blocks", lambda *a, **k: None)
+    monkeypatch.setattr(main, "run_threaded", lambda *a, **k: None)
+    main.image_files = [_FAKE_BATCH_PAGE]
+    main.curr_img_idx = 0
+    main.image_states = {_FAKE_BATCH_PAGE: {}}
+
+    assert main.cancel_button.isEnabled() is False
+    main.block_detect()
+    for button in main.hbutton_group.get_button_group().buttons():
+        assert button.isEnabled() is False
+    assert main.cancel_button.isEnabled() is False
+
+
+# --- Webtoon inaccessible depuis l'interface (revérif tester, point 4) --------------------------
+
+
+def test_webtoon_toggle_has_no_keyboard_shortcut():
+    """Aucun raccourci ne peut plus déclencher le mode webtoon : `app/shortcuts.py` ne référence
+    aucun identifiant de raccourci lié au webtoon."""
+    import app.shortcuts as shortcuts_module
+
+    for definition in shortcuts_module.SHORTCUT_DEFINITIONS:
+        assert "webtoon" not in definition.id.lower()
+
+
+def test_webtoon_toggle_hidden_and_has_no_default_shortcut_bound(main):
+    assert main.webtoon_toggle.isVisibleTo(main) is False
+    assert main.webtoon_toggle.shortcut().isEmpty()
+
+
+def test_update_ui_from_project_resets_webtoon_mode_before_display_and_set_mode(main, monkeypatch):
+    """Reprend `test_update_ui_from_project_resets_webtoon_mode` avec un projet non vide : prouve
+    que la remise à `False` a bien lieu avant `_display_image_and_set_mode` (qui lirait sinon un
+    `webtoon_mode` resté à `True`, hérité d'un `.ctpr` sauvegardé avant la sous-étape 2b)."""
+    main.image_files = [_FAKE_BATCH_PAGE]
+    main.image_states = {_FAKE_BATCH_PAGE: {"source_lang": "Auto", "target_lang": "English"}}
+    main.curr_img_idx = 0
+    main.webtoon_mode = True  # simule un `.ctpr` webtoon rechargé (`project_state.py:182`)
+
+    captured = {}
+
+    def _fake_run_threaded(callback, result_callback=None, error_callback=None, *a, **k):
+        # Capture l'état de `webtoon_mode` tel que vu par le résultat, sans threading réel.
+        captured["webtoon_mode_at_display"] = main.webtoon_mode
+        return None
+
+    monkeypatch.setattr(main, "run_threaded", _fake_run_threaded)
+
+    main.project_ctrl.update_ui_from_project()
+
+    assert main.webtoon_mode is False
+    assert captured["webtoon_mode_at_display"] is False
+
+
+# --- Démarrage QSettings `main_page/mode` : automatique et manuel, même état final (point 3) ----
+
+
+class _FakeQSettings:
+    """Remplace `QSettings` sans toucher au vrai magasin de réglages (consigne d'hygiène) :
+    `beginGroup`/`endGroup` no-op, `value` lit un dict fixe, `setValue` ignoré."""
+
+    def __init__(self, values: dict | None = None) -> None:
+        self._values = values or {}
+
+    def beginGroup(self, _name: str) -> None:
+        pass
+
+    def endGroup(self) -> None:
+        pass
+
+    def value(self, key: str, default=None, type=None):  # noqa: A002 (nom imposé par QSettings)
+        found = self._values.get(key, default)
+        if type is not None and found is not None:
+            return type(found)
+        return found
+
+    def setValue(self, _key: str, _value) -> None:
+        pass
+
+
+def _resting_button_snapshot(main) -> tuple:
+    return (
+        tuple(b.isEnabled() for b in main.hbutton_group.get_button_group().buttons()),
+        main.translate_button.isEnabled(),
+        main.cancel_button.isEnabled(),
+    )
+
+
+@pytest.mark.parametrize("mode", ["automatic", "manual"])
+def test_load_main_page_settings_mode_reaches_identical_resting_state(main, monkeypatch, mode):
+    values = {
+        "source_language": "Auto",
+        "target_language": "English",
+        "mode": mode,
+        "brush_size": 10,
+        "eraser_size": 20,
+    }
+    monkeypatch.setattr(projects_module, "QSettings", lambda *a, **k: _FakeQSettings(values))
+
+    main.project_ctrl.load_main_page_settings()
+
+    assert _resting_button_snapshot(main) == (
+        tuple(True for _ in main.hbutton_group.get_button_group().buttons()),
+        True,
+        False,
+    )
+
+
+def test_save_main_page_settings_does_not_raise_reading_parked_radio(main, monkeypatch):
+    """`save_main_page_settings` (`projects.py:~1410`) lit toujours `main_radio.isChecked()` — le
+    widget reste vivant (parqué, jamais détruit), la lecture ne doit pas lever."""
+    fake = _FakeQSettings()
+    monkeypatch.setattr(projects_module, "QSettings", lambda *a, **k: fake)
+
+    main.project_ctrl.save_main_page_settings()  # ne doit pas lever
+
+
+# --- COMIC_SHELL=0 : radios/interrupteur webtoon visibles en mode diagnostic (point 5) -----------
+
+
+def test_comic_shell_disabled_hides_only_the_webtoon_toggle(qtbot, monkeypatch):
+    """`COMIC_SHELL=0` renvoie l'ancienne disposition telle quelle (mode diagnostic) : les radios
+    Manuel/Automatique, devenues inoffensives (fonctions de mode neutres), restent visibles ;
+    l'interrupteur webtoon est masqué, le webtoon n'étant plus pris en charge (spec 04 §7)."""
+    monkeypatch.setenv("COMIC_SHELL", "0")
+
+    widget = ComicTranslateUI()
+    qtbot.addWidget(widget)
+
+    assert widget._shell_active is False
+    assert widget._shell_failure == "désactivé par COMIC_SHELL=0"
+    assert widget.webtoon_toggle.isHidden() is True
+    for name in ("manual_radio", "automatic_radio"):
+        assert getattr(widget, name).isHidden() is False
