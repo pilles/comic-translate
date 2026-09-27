@@ -196,7 +196,25 @@ projet. Rien de neuf, rien de cassé.
 > garde-fou « ne jamais se déclencher pendant l'exécution d'un lot », comparaison du rappel par
 > `==`. (Livré avec 10 lignes au lieu de 3 : mémorisation de l'opération en cours nécessaire au garde-fou.)
 >
-> **2c inchangée** (pile Page/Bulle, règle de focus).
+> **2c livrée le 2026-09-28.** Panneau de droite contextuel : `panel.py` réécrit en
+> `QStackedWidget` à deux pages — Page (rien de sélectionné : Langue source/cible, `set_all_button`,
+> aide « Sélectionnez une bulle pour voir son texte ») et Bulle (une bulle sélectionnée : `QSplitter`
+> vertical « <langue> · reconnu » + « <langue> · traduction », bouton Historique). « Rendu du
+> texte »/« Outils » restent communs sous la pile. `modules/shell/context.py` (pur, `panel_context`)
+> + `modules/shell/watcher.py` (nouveau, `_ContextWatcher`) basculent la pile sur signaux
+> (`rectangle_selected`, `clear_text_edits`, `currentItemChanged`, relâchement souris, Show/Hide de
+> la recherche) regroupés par `singleShot(0)`, plus un chien de garde à 200 ms (médiane 0,0023
+> ms/tick) pour les affectations directes sans signal. Règle de focus : lecture de
+> `window().focusWidget()` (jamais `QApplication.focusWidget()`) avant tout `setCurrentIndex`,
+> section sortante rendue au viewer ou déclarée sans focus, jamais de focus donné à la section
+> entrante. Zéro ligne amont. Champs texte 161/160 px à 1225×797. Tests : `tests/test_shell.py` 15
+> hors GUI, `tests/test_shell_ui.py` ~75 `--gui`. Suites : 263 passed hors GUI ; `--gui` 385 passed,
+> 3 skipped, 1 failed (`test_app.py`, amont connu). Détail complet : ADR-015 (amendement,
+> `specs/decisions.md`).
+>
+> **Jalon 2 clos** : 2a, 2b, 2b-bis, 2c livrées ; validation manuelle de Philippe reçue pour 2b et 2c
+> le 2026-09-28 (couvre aussi 2a, déjà validée). Reporté : « source jamais vidée » (annotation 4 de
+> la maquette).
 >
 > **Plantage natif rencontré pendant les tests de la 2b** (sans rapport avec le shell) : voir
 > ADR-018 — bug PySide6/Shiboken6 6.11.2, pas du fork ; consigne de lancement des tests `--gui`
@@ -205,6 +223,30 @@ projet. Rien de neuf, rien de cassé.
 ### Jalon 3 — Action unique et retours explicites
 
 *But :* ne plus avoir à connaître l'ordre des étapes, ne plus subir le silence.
+
+> **Sous-étape 3a — Réinitialiser la page.** Demande de Philippe (2026-09-28) : « rajoute un
+> bouton "reset", ça permet de repartir sur une page "propre" ». Placée avant le reste du jalon 3
+> (gain rapide). Cadrage ci-dessous, présenté comme des **choix par défaut à confirmer par la
+> conception**, pas encore implémenté :
+>
+> - **Effet** : remettre la page courante dans l'état « jamais traitée » — aucun bloc, aucun
+>   rectangle, aucun texte reconnu/traduit, aucun patch de nettoyage, aucun tracé de pinceau/
+>   segmentation, aucun texte rendu — l'image d'origine seule, comme à l'ouverture de l'album. Les
+>   pastilles du jalon 1 retombent à « rien de fait ».
+> - **Annulable** par Cmd+Z en une seule étape (macro d'annulation) : c'est ce qui rend l'action
+>   sûre sans boîte de confirmation. Si la conception montre qu'une annulation complète n'est pas
+>   atteignable proprement, une confirmation explicite devient alors obligatoire.
+> - **Portée** : la page affichée. Si plusieurs pages sont sélectionnées dans la liste : question
+>   ouverte (appliquer à la sélection ou non), à trancher en conception.
+> - **Ne touche jamais** : le fichier image d'origine, les autres pages, les réglages (langues,
+>   police), le projet sur disque avant la prochaine sauvegarde.
+> - **Historique par bulle** (ADR-012) : les versions disparaissent avec les blocs ; l'annulation
+>   les restaure.
+> - **Emplacement du bouton** : dans l'en-tête, à côté des six étapes (libellé « Réinitialiser ») —
+>   à confirmer en conception au regard de la barre d'étapes du jalon 3.
+> - **Critère de réussite manuel** : sur une page traduite, rendue et nettoyée → Réinitialiser →
+>   page d'origine, panneau vide, pastilles éteintes ; Cmd+Z → tout revient ; Détecter repart
+>   normalement.
 
 - Barre d'étapes alimentée par le jalon 1, bouton « Continuer ».
 - Messages de résultat après chaque étape, avec des nombres.

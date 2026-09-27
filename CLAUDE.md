@@ -83,15 +83,22 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   purs (déduction pure sur `blk_list`/`image_states`, **aucune écriture, jamais d'ajout d'écriture
   dans ce paquet**), `ui.py` (délégué par composition, seul fichier à importer PySide6). Importé
   uniquement depuis `controller.py`. Détail : ADR-014.
-- `modules/shell/` — nouvelle disposition (spec 04 jalon 2, sous-étapes 2a et 2b) : reparente les
-  mêmes objets construits par `_create_main_content` (jamais recréés — ~400 lectures de widgets par
-  nom dans les contrôleurs) dans une disposition à 3 colonnes. `manifest.py` (pur, noms d'attributs
-  par zone) **seul fichier à revoir au rebase amont** ; zone `PARKED` (2b) —
-  `manual_radio`/`automatic_radio`/`webtoon_toggle` — jamais déplacée, masquée sur place
-  (`_hide_parked_widgets`), y compris en repli et sous `COMIC_SHELL=0` (webtoon seulement). Importé
-  uniquement depuis `window.py`, n'importe jamais `app.controllers`/`app.ui.main_window`. Repli
-  visible si le reparentage échoue (`main._shell_active = False`) ; interrupteur `COMIC_SHELL=0`
-  pour l'ancienne disposition sans bandeau. Détail : ADR-015.
+- `modules/shell/` — nouvelle disposition (spec 04 jalon 2, sous-étapes 2a/2b/2b-bis/2c, **jalon 2
+  clos** le 2026-09-28) : reparente les mêmes objets construits par `_create_main_content` (jamais
+  recréés — ~400 lectures de widgets par nom dans les contrôleurs) dans une disposition à 3
+  colonnes. `manifest.py` (pur, noms d'attributs par zone) **seul fichier à revoir au rebase
+  amont** ; zone `PARKED` (2b) — `manual_radio`/`automatic_radio`/`webtoon_toggle` — jamais
+  déplacée, masquée sur place (`_hide_parked_widgets`), y compris en repli et sous `COMIC_SHELL=0`
+  (webtoon seulement). Importé uniquement depuis `window.py`, n'importe jamais
+  `app.controllers`/`app.ui.main_window`. Repli visible si le reparentage échoue
+  (`main._shell_active = False`) ; interrupteur `COMIC_SHELL=0` pour l'ancienne disposition sans
+  bandeau. `panel.py` (2c) : panneau de droite en `QStackedWidget` Page/Bulle (« Rendu du texte »/
+  « Outils » communs sous la pile). `context.py` (pur, 2c) : `panel_context` décide Page vs Bulle.
+  `watcher.py` (nouveau, 2c, importe PySide6) : `_ContextWatcher` bascule la pile sur signaux
+  regroupés par `singleShot(0)` + chien de garde 200 ms ; règle de focus **avant tout
+  `setCurrentIndex`** : lire `window().focusWidget()` (jamais `QApplication.focusWidget()`, `None`
+  hors fenêtre active), rendre le focus au viewer en sortant d'une section, ne jamais en donner à la
+  section entrante. Détail : ADR-015.
 
 ## Traduction locale (Ollama)
 
@@ -106,6 +113,11 @@ timeout 180 s (10–1800).
 `Edit`/`Write`) via `force-exclude = true` + `extend-exclude` explicite (ADR-008). **Ne jamais
 retirer `force-exclude`** ; ajouter tout nouveau dossier amont touché par `# fork:` à
 `extend-exclude` avant la première édition. `modules/cleaning/` et `tools/` restent lintés.
+
+**Piège du hook `ruff --fix`** (rencontré spec 04, sous-étape 2c) : sur un fichier linté, le hook
+supprime un import ajouté dans une édition s'il n'est utilisé que dans une édition *suivante*
+(import jugé inutile au moment où il est posé seul). Toujours ajouter l'import et son premier usage
+dans la **même** édition ; vérifier après coup par `grep -n "^import\|^from" <fichier>`.
 
 ## Règle « voir l'original »
 

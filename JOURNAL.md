@@ -1,5 +1,48 @@
 # JOURNAL
 
+## 2026-09-28 — Spec 04 jalon 2 (2c) : panneau contextuel, jalon 2 clos ; spec 3a ajoutée
+
+- **2c livrée et validée à la main par Philippe** (avec la 2b, validée au même passage) :
+  `modules/shell/context.py` (pur) — `panel_context(curr_tblock, curr_tblock_item, search_visible)`
+  → « bubble » / « page ». `modules/shell/panel.py` réécrit en `QStackedWidget` à deux pages : Page
+  (Langue source + `s_combo`, Langue cible + `t_combo`, `set_all_button`, aide « Sélectionnez une
+  bulle pour voir son texte ») et Bulle (`QSplitter` vertical « <langue> · reconnu » +
+  `s_text_edit` / « <langue> · traduction » + `t_text_edit`, bouton Historique). « Rendu du texte »
+  et « Outils » restent communs sous la pile (double usage : sans sélection, ils règlent le prochain
+  « Rendre »).
+- `modules/shell/watcher.py` (nouveau) : `_ContextWatcher` — déclencheurs
+  `image_viewer.rectangle_selected`, `image_viewer.clear_text_edits`,
+  `page_list.currentItemChanged`, filtre relâchement souris sur le viewport, filtre Show/Hide sur
+  `search_panel`, chien de garde à 200 ms (sort si le panneau est invisible, médiane 0,0023 ms par
+  tick) ; regroupement par `singleShot(0)` ; `setCurrentIndex` seulement au changement ; libellés de
+  langue relus à chaque évaluation.
+- **Règle de focus** : avant tout `setCurrentIndex`, lecture de `window().focusWidget()` (jamais
+  `QApplication.focusWidget()`, `None` quand l'app est inactive) ; si le focus est dans la section
+  sortante → `image_viewer.setFocus()` (ou `clearFocus()` si la vue est cachée, le focus tombe alors
+  à `None`, jamais sur une liste de langue) ; le shell ne donne jamais le focus à la section
+  entrante. Évite qu'Espace sur « Set for all » écrase les langues de tout l'album ou qu'une lettre
+  change la langue source. Recherche Ctrl+F : `setFocus` sur un champ de la page cachée est accepté
+  par Qt et restitué à la bascule (vérifié par test) — pas de modification de `search_replace.py`.
+- 0 ligne amont. Champs texte en contexte Bulle : 161/160 px à 1225×797 (136 en 2a, 120 avant).
+  Tests : `tests/test_shell.py` 15, `tests/test_shell_ui.py` ~75 (dont analyse AST de non-écriture,
+  chien de garde qui rattrape les affectations directes sans signal, focus fenêtre inactive, écran
+  vide). Suites : 263 passed hors GUI ; `--gui` 385 passed, 3 skipped, 1 failed (`test_app.py`,
+  amont connu).
+- Piège d'outillage consigné dans `CLAUDE.md` : le hook de formatage (`ruff --fix`) supprime un
+  import ajouté dans une édition et utilisé seulement dans une édition suivante — ajouter l'import
+  et son premier usage dans la **même** édition, vérifier par `grep` après coup. Et : les tests du
+  chien de garde exigent la fenêtre affichée (`main.show()`), sinon il sort immédiatement par
+  construction.
+- **Jalon 2 clos** (2a, 2b, 2b-bis, 2c livrées). Reporté, toujours ouvert : « source jamais vidée »
+  (maquette, annotation 4 ; défauts amont `image.py:1131`, `text.py:929`, `rect_item.py:62-63`).
+  Détail complet : ADR-015 (amendement 2c), `specs/decisions.md`.
+- **Nouvelle demande de Philippe** ajoutée à la spec : bouton « Réinitialiser la page » (jalon 3,
+  sous-étape 3a) — remettre la page courante à l'état « jamais traitée », annulable par Cmd+Z en une
+  seule étape (macro d'annulation), sans confirmation tant que l'annulation complète est atteignable
+  proprement. Cadrage complet, encore à trancher en conception : `specs/04-refonte-interface.md` §5
+  jalon 3.
+- Reste à faire : commit du lot 2c, démarrage du jalon 3 (dont la 3a).
+
 ## 2026-09-27 (troisième passage) — Spec 04 jalon 2 (2b-bis) : défaut amont n°3 corrigé
 
 - Décision de Philippe : corriger (plutôt que contourner ou laisser). `app/controllers/task_runner.py`,

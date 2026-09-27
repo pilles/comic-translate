@@ -28,7 +28,7 @@ from typing import Any
 from PySide6 import QtCore, QtWidgets
 
 from app.ui.dayu_widgets.alert import MAlert
-from modules.shell import manifest
+from modules.shell import manifest, watcher
 from modules.shell.panel import PanelSkeleton, build_panel_skeleton
 
 logger = logging.getLogger(__name__)
@@ -233,13 +233,15 @@ def _move_all(main: Any, hierarchy: _Hierarchy, journal: list[_MoveRecord]) -> N
     _move_as_overlay_child(main, journal, "original_view_button", hierarchy.center_container)
 
     panel = hierarchy.panel
-    _move_to_layout(main, journal, "s_combo", panel.source_combo_row, stretch=1)
-    _move_to_layout(main, journal, "s_text_edit", panel.source_layout, stretch=1)
-    _move_to_layout(main, journal, "t_combo", panel.target_combo_row, stretch=1)
-    _move_to_layout(main, journal, "t_text_edit", panel.target_layout, stretch=1)
-    _move_to_layout(main, journal, "block_history_button", panel.actions_layout)
-    _move_to_layout(main, journal, "set_all_button", panel.actions_layout)
-    panel.actions_layout.addStretch()
+    _move_to_layout(main, journal, "s_combo", panel.page_source_lang_row, stretch=1)
+    _move_to_layout(main, journal, "t_combo", panel.page_target_lang_row, stretch=1)
+    _move_to_layout(main, journal, "set_all_button", panel.page_actions_row)
+    panel.page_actions_row.addStretch()
+
+    _move_to_layout(main, journal, "s_text_edit", panel.bubble_source_layout, stretch=1)
+    _move_to_layout(main, journal, "t_text_edit", panel.bubble_target_layout, stretch=1)
+    _move_to_layout(main, journal, "block_history_button", panel.bubble_actions_row)
+    panel.bubble_actions_row.addStretch()
 
     # Nom de police seul sur sa rangée (correctif troncature, retour tester) : partagée avec les
     # deux menus de taille fixe, elle n'avait plus assez de largeur dans les 280 px du panneau.
@@ -415,6 +417,8 @@ def _finalize(
     _hide_parked_widgets(main)
     _unlock_text_edit_heights(main)
     _install_badge_wiring(main, hierarchy)
+    main._shell_panel = hierarchy.panel
+    watcher.install_context_watcher(main, hierarchy.panel)
     main._shell_active = True
     main._shell_failure = None
     return hierarchy.shell_content
@@ -441,6 +445,7 @@ def _build_fallback(main: Any, legacy_content: QtWidgets.QWidget, reason: str) -
     main._shell_active = False
     main._shell_failure = reason
     main._shell_legacy = None
+    main._shell_panel = None
     return container
 
 

@@ -10,23 +10,27 @@ from __future__ import annotations
 
 import inspect
 import re
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from PySide6 import QtWidgets
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QUndoCommand, QUndoStack
 
 import app.controllers.projects as projects_module
 import controller as controller_module
 import modules.shell.layout as shell_layout_module
 import modules.shell.manifest as manifest
+import modules.shell.panel as panel_module
+import modules.shell.watcher as watcher_module
 import modules.view.original as original_module
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.dayu_widgets.alert import MAlert
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
 from modules.history.ui import _BUTTON_TOOLTIP
+from modules.utils.textblock import TextBlock
 
 
 def _count_expected_moves() -> int:
@@ -88,6 +92,42 @@ def main(qtbot):
     _neutralize_side_effects(instance)
     yield instance
     # `qtbot` ferme (et détruit) le widget automatiquement en fin de test.
+
+
+# --- Sous-étape 2c : panneau contextuel Page/Bulle ---------------------------------------------
+#
+# `_fake_text_block()` : bloc minimal utilisable comme `curr_tblock`, sans dépendre d'un vrai
+# `TextBlock` ni d'une vraie sélection de rectangle. `SimpleNamespace` (pas `object()`) : accepte
+# les écritures `text`/`translation` que `TextController.update_text_block`/
+# `update_text_block_from_edit` (connectés à `s_text_edit`/`t_text_edit.textChanged`) pourraient
+# faire pendant ces tests.
+
+
+def _fake_text_block() -> SimpleNamespace:
+    return SimpleNamespace(text="", translation="")
+
+
+def _select_fake_bubble(main) -> None:
+    """Bascule le panneau droit en contexte Bulle sans passer par une vraie sélection de
+    rectangle (`RectItemController.handle_rectangle_selection`) : affecte directement
+    `curr_tblock`, puis demande une réévaluation synchrone (`evaluate_now`, pas besoin de faire
+    tourner la boucle d'événements — précédent : `_reposition_original_badge` appelé directement
+    par les tests du badge Original)."""
+    main.curr_tblock = _fake_text_block()
+    main._shell_context_watcher.evaluate_now()
+
+
+def _deselect_to_page(main) -> None:
+    main.curr_tblock = None
+    main._shell_context_watcher.evaluate_now()
+
+
+def _show_main_with_viewer(main) -> None:
+    main.show_main_page()
+    main.central_stack.setCurrentWidget(main.image_viewer)
+    main.show()
+    QtWidgets.QApplication.processEvents()
+    QtWidgets.QApplication.processEvents()
 
 
 # --- Snapshot structurel (type + position + stretch, pas identité) --------------------------
@@ -641,15 +681,21 @@ def test_fallback_does_not_wire_badge_to_legacy_central_stack(qtbot, monkeypatch
 def test_text_edit_measured_height_at_window_size(main, size):
     width, height = size
     main.show_main_page()
+    main.central_stack.setCurrentWidget(main.image_viewer)
     main.resize(width, height)
     main.show()
     QtWidgets.QApplication.processEvents()
     QtWidgets.QApplication.processEvents()
 
+    # Mesure en contexte Bulle (sous-étape 2c) : hors de ce contexte, les champs sont sur la page
+    # inactive de la pile et leur géométrie ne reflète pas forcément la taille de fenêtre réelle.
+    _select_fake_bubble(main)
+    QtWidgets.QApplication.processEvents()
+
     s_height = main.s_text_edit.height()
     t_height = main.t_text_edit.height()
     print(
-        f"[mesure shell 2a] fenêtre {width}x{height} : s_text_edit={s_height}px t_text_edit={t_height}px"
+        f"[mesure shell 2c] fenêtre {width}x{height} : s_text_edit={s_height}px t_text_edit={t_height}px"
     )
 
     # Pas d'assertion de seuil ici (rapportée telle quelle à Philippe, voir consigne de vérif) :
@@ -659,19 +705,23 @@ def test_text_edit_measured_height_at_window_size(main, size):
     assert t_height > 0
 
 
-# Fenêtre par défaut (Air 13"), seuil du jalon : au moins la hauteur d'avant (`setFixedHeight(120)`
-# amont, `workspace.py:157`/`:167`) — correctif retour tester du 2026-09-26 (rangée libellé+combo
-# fusionnée, espacements resserrés, voir `modules/shell/panel.py`).
+# Fenêtre par défaut (Air 13"), seuil du jalon : les champs regagnent la hauteur perdue en 2a
+# (rangées de langue déplacées vers la page Page, sous-étape 2c) — au moins 150 px, contre 120 px
+# avant (2a) et 84/83 px à « Texte plus grand » (2a, sous les 120 px d'avant).
 _DEFAULT_WINDOW_SIZE = (1225, 797)
-_MIN_TEXT_EDIT_HEIGHT_AT_DEFAULT_SIZE = 120
+_MIN_TEXT_EDIT_HEIGHT_AT_DEFAULT_SIZE = 150
 
 
 def test_text_edit_height_at_default_window_size_meets_pre_shell_height(main):
     width, height = _DEFAULT_WINDOW_SIZE
     main.show_main_page()
+    main.central_stack.setCurrentWidget(main.image_viewer)
     main.resize(width, height)
     main.show()
     QtWidgets.QApplication.processEvents()
+    QtWidgets.QApplication.processEvents()
+
+    _select_fake_bubble(main)
     QtWidgets.QApplication.processEvents()
 
     assert main.s_text_edit.height() >= _MIN_TEXT_EDIT_HEIGHT_AT_DEFAULT_SIZE
@@ -1033,3 +1083,475 @@ def test_comic_shell_disabled_hides_only_the_webtoon_toggle(qtbot, monkeypatch):
     assert widget.webtoon_toggle.isHidden() is True
     for name in ("manual_radio", "automatic_radio"):
         assert getattr(widget, name).isHidden() is False
+
+
+# ================================================================================================
+# Sous-étape 2c : panneau droit contextuel (pile Page/Bulle)
+# ================================================================================================
+
+# --- Structure : chaque widget dans la bonne page de la pile -----------------------------------
+
+
+def test_page_widget_holds_language_widgets_bubble_widget_holds_text_fields(main):
+    panel = main._shell_panel
+    page_widget = panel.stack.widget(panel.page_index)
+    bubble_widget = panel.stack.widget(panel.bubble_index)
+
+    for name in ("s_combo", "t_combo", "set_all_button"):
+        widget = getattr(main, name)
+        assert page_widget.isAncestorOf(widget), f"{name} hors de la page Page"
+        assert not bubble_widget.isAncestorOf(widget), f"{name} dans la page Bulle"
+
+    for name in ("s_text_edit", "t_text_edit", "block_history_button"):
+        widget = getattr(main, name)
+        assert bubble_widget.isAncestorOf(widget), f"{name} hors de la page Bulle"
+        assert not page_widget.isAncestorOf(widget), f"{name} dans la page Page"
+
+
+def test_page_is_shown_by_default_with_nothing_selected(main):
+    assert main._shell_panel.stack.currentIndex() == main._shell_panel.page_index
+
+
+# --- Table de vérité de la bascule, `setCurrentIndex` seulement au changement ------------------
+
+
+def test_stack_switches_on_curr_tblock_and_setCurrentIndex_only_on_change(main):
+    panel = main._shell_panel
+    changes = []
+    panel.stack.currentChanged.connect(changes.append)
+
+    assert panel.stack.currentIndex() == panel.page_index
+
+    _select_fake_bubble(main)
+    assert panel.stack.currentIndex() == panel.bubble_index
+    assert changes == [panel.bubble_index]
+
+    # Réévaluer sans rien changer : aucune nouvelle bascule (`setCurrentIndex` non appelé).
+    main._shell_context_watcher.evaluate_now()
+    assert changes == [panel.bubble_index]
+
+    _deselect_to_page(main)
+    assert panel.stack.currentIndex() == panel.page_index
+    assert changes == [panel.bubble_index, panel.page_index]
+
+
+def test_stack_switches_to_bubble_via_curr_tblock_item(main):
+    panel = main._shell_panel
+    main.curr_tblock_item = SimpleNamespace()
+    main._shell_context_watcher.evaluate_now()
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+
+def test_stack_switches_to_bubble_while_search_panel_visible(main):
+    panel = main._shell_panel
+    _show_main_with_viewer(main)
+
+    main.show_search_sidebar()
+    QtWidgets.QApplication.processEvents()
+    QtWidgets.QApplication.processEvents()
+
+    assert main.search_panel.isVisible() is True
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+    main._set_search_sidebar_visible(False)
+    QtWidgets.QApplication.processEvents()
+    QtWidgets.QApplication.processEvents()
+
+    assert panel.stack.currentIndex() == panel.page_index
+
+
+# --- Déclencheurs réels (pas seulement `evaluate_now` appelé à la main) ------------------------
+
+
+def test_real_rectangle_selected_signal_switches_to_bubble(main):
+    """Bout en bout par le vrai signal, pas seulement `evaluate_now` appelé à la main : un vrai
+    `TextBlock` dans `blk_list`, à la même géométrie que le rectangle émis, pour que le vrai
+    gestionnaire (`RectItemController.handle_rectangle_selection`, connecté au même signal depuis
+    `controller.py`) affecte lui-même `curr_tblock` — sinon, câbler notre propre `curr_tblock`
+    factice serait écrasé par ce même gestionnaire réel (aucune correspondance trouvée -> `None`),
+    avant même que notre watcher (mis en attente par `QTimer.singleShot(0)`) ait pu le relire."""
+    panel = main._shell_panel
+    assert panel.stack.currentIndex() == panel.page_index
+
+    blk = TextBlock(text_bbox=np.array([0, 0, 10, 10]))
+    main.blk_list.append(blk)
+
+    main.image_viewer.rectangle_selected.emit(QRectF(0, 0, 10, 10))
+    QtWidgets.QApplication.processEvents()
+
+    assert main.curr_tblock is blk
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+
+def test_real_clear_text_edits_signal_switches_to_page(main):
+    panel = main._shell_panel
+    _select_fake_bubble(main)
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+    main.curr_tblock = None
+    main.image_viewer.clear_text_edits.emit()
+    QtWidgets.QApplication.processEvents()
+
+    assert panel.stack.currentIndex() == panel.page_index
+
+
+def test_real_page_list_current_item_changed_signal_triggers_reevaluation(main):
+    panel = main._shell_panel
+    _select_fake_bubble(main)
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+    main.curr_tblock = None
+    main.page_list.currentItemChanged.emit(None, None)
+    QtWidgets.QApplication.processEvents()
+
+    assert panel.stack.currentIndex() == panel.page_index
+
+
+def test_viewport_mouse_release_event_triggers_reevaluation(main):
+    """Appelle `eventFilter` directement plutôt que `QApplication.sendEvent` (précédent :
+    `test_alt_key_still_toggles_veil_through_shell` dans ce même fichier) : un `QEvent` générique
+    (type seul, pas un vrai `QMouseEvent`) suffit à notre filtre (qui ne lit que `event.type()`),
+    mais ferait planter la gestion d'événements réelle de `QGraphicsView` si elle le recevait via
+    la boucle Qt (downcast implicite vers `QMouseEvent`)."""
+    panel = main._shell_panel
+    _select_fake_bubble(main)
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+    main.curr_tblock = None
+    watcher = main._shell_context_watcher
+    event = QEvent(QEvent.Type.MouseButtonRelease)
+    consumed = watcher.eventFilter(main.image_viewer.viewport(), event)
+    assert consumed is False
+    QtWidgets.QApplication.processEvents()
+
+    assert panel.stack.currentIndex() == panel.page_index
+
+
+def test_schedule_coalesces_multiple_triggers_into_one_evaluation(main, monkeypatch):
+    watcher = main._shell_context_watcher
+    calls = {"n": 0}
+    original_evaluate = watcher.evaluate_now
+
+    def _counting_evaluate():
+        calls["n"] += 1
+        original_evaluate()
+
+    monkeypatch.setattr(watcher, "evaluate_now", _counting_evaluate)
+
+    watcher.schedule()
+    watcher.schedule()
+    watcher.schedule()
+    QtWidgets.QApplication.processEvents()
+
+    assert calls["n"] == 1
+
+
+# --- Libellés dynamiques de la page Bulle : relus à chaque évaluation --------------------------
+
+
+def test_bubble_captions_reflect_combo_text_at_each_evaluation(main):
+    panel = main._shell_panel
+
+    main.s_combo.blockSignals(True)
+    main.t_combo.blockSignals(True)
+    main.s_combo.setCurrentText("English")
+    main.t_combo.setCurrentText("French")
+    main.s_combo.blockSignals(False)
+    main.t_combo.blockSignals(False)
+
+    _select_fake_bubble(main)
+
+    assert "English" in panel.bubble_source_caption.text()
+    assert "French" in panel.bubble_target_caption.text()
+
+    # Changement sous `blockSignals` (motif réel de `app/controllers/image.py:~1077-1086`) :
+    # aucun signal ne prévient le watcher, seule la prochaine évaluation le voit.
+    main.s_combo.blockSignals(True)
+    main.s_combo.setCurrentText("Spanish")
+    main.s_combo.blockSignals(False)
+
+    main._shell_context_watcher.evaluate_now()
+    assert "Spanish" in panel.bubble_source_caption.text()
+
+
+# --- Règle de focus (condition bloquante du critic, sous-étape 2c) -----------------------------
+
+
+def test_focus_moves_to_image_viewer_when_switching_bubble_to_page(main):
+    _show_main_with_viewer(main)
+    _select_fake_bubble(main)
+    assert main._shell_panel.stack.currentIndex() == main._shell_panel.bubble_index
+
+    main.t_text_edit.setFocus()
+    QtWidgets.QApplication.processEvents()
+    assert main.window().focusWidget() is main.t_text_edit
+
+    _deselect_to_page(main)
+
+    fw = main.window().focusWidget()
+    assert fw is main.image_viewer
+    assert fw not in (main.s_combo, main.t_combo, main.set_all_button)
+
+
+def test_focus_rule_holds_when_application_reports_no_focus_widget(main, monkeypatch):
+    """Fenêtre inactive simulée : `QApplication.focusWidget()` tomberait à `None`, mais
+    `window().focusWidget()` (ce que lit la règle de focus, jamais `QApplication.focusWidget()`)
+    continue de désigner le widget qui regagnerait le focus à la réactivation — c'est précisément
+    pourquoi la règle ne doit jamais lire `QApplication.focusWidget()`."""
+    _show_main_with_viewer(main)
+    _select_fake_bubble(main)
+
+    main.t_text_edit.setFocus()
+    QtWidgets.QApplication.processEvents()
+    assert main.window().focusWidget() is main.t_text_edit
+
+    monkeypatch.setattr(QtWidgets.QApplication, "focusWidget", staticmethod(lambda: None))
+    assert QtWidgets.QApplication.focusWidget() is None
+    assert main.window().focusWidget() is main.t_text_edit  # inchangé malgré le monkeypatch
+
+    _deselect_to_page(main)
+
+    assert main.window().focusWidget() is main.image_viewer
+
+
+def test_focus_does_not_land_in_bubble_fields_when_switching_page_to_bubble(main):
+    _show_main_with_viewer(main)
+    assert main._shell_panel.stack.currentIndex() == main._shell_panel.page_index
+
+    main.t_combo.setFocus()
+    QtWidgets.QApplication.processEvents()
+    assert main.window().focusWidget() is main.t_combo
+
+    _select_fake_bubble(main)
+
+    fw = main.window().focusWidget()
+    assert fw is not main.s_text_edit
+    assert fw is not main.t_text_edit
+
+
+# --- Non-écriture : ni les champs, ni la scène, ne sont touchés par la bascule -----------------
+
+
+def test_context_switches_do_not_write_field_contents_or_scene_state(main):
+    _show_main_with_viewer(main)
+
+    main.s_text_edit.setPlainText("texte source de test")
+    main.t_text_edit.setPlainText("texte traduction de test")
+
+    state_before = main.image_viewer.save_state()
+    s_before = main.s_text_edit.toPlainText()
+    t_before = main.t_text_edit.toPlainText()
+
+    for i in range(10):
+        if i % 2 == 0:
+            _select_fake_bubble(main)
+        else:
+            _deselect_to_page(main)
+
+    assert main.s_text_edit.toPlainText() == s_before
+    assert main.t_text_edit.toPlainText() == t_before
+    assert main.image_viewer.save_state() == state_before
+
+
+# --- Chien de garde : ne lève jamais, y compris sans `curr_tblock` (ComicTranslateUI seul) -----
+
+
+def test_watchdog_and_evaluate_now_do_not_raise_without_curr_tblock(qtbot):
+    widget = ComicTranslateUI()
+    qtbot.addWidget(widget)
+
+    assert not hasattr(widget, "curr_tblock")
+    assert not hasattr(widget, "curr_tblock_item")
+
+    widget._shell_context_watcher.evaluate_now()  # ne doit pas lever
+    widget._shell_context_watchdog.timeout.emit()  # ne doit pas lever
+
+
+# --- Revérif tester (rapport 2c) : chemins sans signal fiable, rattrapés par le vrai chien de
+# garde (pas `evaluate_now()` appelé à la main) --------------------------------------------------
+#
+# `DeleteBoxesCommand.redo`/`undo` (`app/ui/commands/box.py:203,208`) et
+# `TextController.clear_text_edits` (`app/controllers/text.py:96-97`, utilisé par
+# `ImageController.on_render_state_ready` en fin de lot sur la page affichée) affectent
+# `curr_tblock`/`curr_tblock_item` directement, sans émettre `rectangle_selected` ni
+# `clear_text_edits` : seul le chien de garde à 200 ms rattrape ces cas. Les tests suivants
+# laissent tourner le vrai `QTimer` (`qtbot.waitUntil`), jamais `evaluate_now()` à la main.
+
+
+def test_watchdog_catches_direct_curr_tblock_assignment_without_any_signal(main, qtbot):
+    """Reproduit exactement le motif de `DeleteBoxesCommand.redo` (`box.py:203`) et de
+    `TextController.clear_text_edits` (`text.py:96-97`, chemin `on_render_state_ready`,
+    `image.py:~1225-1227`) : affectation directe de `curr_tblock`, aucun signal émis. `main` doit
+    être affichée : le chien de garde sort immédiatement si `panel.stack.isVisible()` est faux
+    (`watcher.py:210`), comme dans l'application réelle où la fenêtre est toujours visible."""
+    _show_main_with_viewer(main)
+    panel = main._shell_panel
+    _select_fake_bubble(main)
+    assert panel.stack.currentIndex() == panel.bubble_index
+
+    main.curr_tblock = None  # affectation directe, comme box.py:203 / text.py:96 — pas de signal
+
+    qtbot.waitUntil(lambda: panel.stack.currentIndex() == panel.page_index, timeout=400)
+
+
+def test_watchdog_catches_direct_bubble_selection_without_any_signal(main, qtbot):
+    """Sens inverse : un contrôleur affecte `curr_tblock` sans passer par
+    `handle_rectangle_selection` (motif générique visé par le chien de garde)."""
+    _show_main_with_viewer(main)
+    panel = main._shell_panel
+    assert panel.stack.currentIndex() == panel.page_index
+
+    main.curr_tblock = _fake_text_block()  # affectation directe, aucun signal émis
+
+    qtbot.waitUntil(lambda: panel.stack.currentIndex() == panel.bubble_index, timeout=400)
+
+
+def test_watchdog_interval_is_at_most_200ms_as_documented(main):
+    assert main._shell_context_watchdog.interval() <= 200
+
+
+# --- Recherche Ctrl+F : ordre réel `select_rectangle` (signal synchrone) puis `setFocus`
+# synchrone sur le champ de la page encore masquée (`search_replace.py::_apply_match_selection`,
+# ~ligne 786-791) --------------------------------------------------------------------------------
+#
+# `InteractionManager.select_rectangle` (`app/ui/canvas/interaction_manager.py:180-186`) émet
+# `rectangle_selected` de façon synchrone (connexion directe, même thread) ; notre watcher se
+# contente de `schedule()` (bascule différée par `QTimer.singleShot(0)`). Le code amont appelle
+# `t_text_edit.setFocus()` juste après, dans le même appel, donc avant que la pile ait basculé.
+# Preuve, avec les vrais widgets de l'app (pas une reproduction synthétique) : Qt accepte
+# `setFocus()` sur un widget caché (page inactive de la pile) et le restitue fidèlement une fois
+# la page rendue courante — aucun `RuntimeWarning`, aucune perte de focus.
+
+
+def test_search_style_focus_before_stack_switch_still_lands_correctly(main, qtbot):
+    _show_main_with_viewer(main)
+    panel = main._shell_panel
+    assert panel.stack.currentIndex() == panel.page_index
+
+    # Même geste que `RectItemController.handle_rectangle_selection` (connecté au signal réel) :
+    # affecte `curr_tblock` de façon synchrone, avant tout traitement Qt de l'événement.
+    main.curr_tblock = _fake_text_block()
+    # Reproduit `search_replace.py::_apply_match_selection` : `setFocus()` synchrone sur
+    # `t_text_edit`, alors que la pile est encore sur la page Page (bascule différée).
+    main.t_text_edit.setFocus()
+
+    assert panel.stack.currentIndex() == panel.page_index  # pas encore basculé (différé)
+    assert main.window().focusWidget() is main.t_text_edit  # Qt l'accepte déjà, widget caché
+
+    # Notre watcher n'a pas encore tourné : c'est `evaluate_now()` (appelé directement par les
+    # tests précédents) ou le passage réel par la boucle d'événements qui déclenche la bascule.
+    # Ici, personne n'a émis de signal (affectation directe) : seul le chien de garde rattrape.
+    qtbot.waitUntil(lambda: panel.stack.currentIndex() == panel.bubble_index, timeout=400)
+
+    assert main.t_text_edit.hasFocus() is True
+    assert main.window().focusWidget() is main.t_text_edit
+
+
+# --- Règle de focus : `image_viewer` invisible (écran vide `drag_browser`) ----------------------
+#
+# Point à attaquer 1 : quand `image_viewer` n'est pas visible, `_move_focus_out_of_outgoing`
+# appelle `clearFocus()` sur le widget sortant plutôt que de lui donner le focus — vérifie qu'il
+# n'atterrit jamais sur `s_combo`/`t_combo`/`set_all_button` (les widgets de la page entrante).
+
+
+def test_focus_cleared_not_redirected_to_page_widgets_when_viewer_hidden(main, qtbot):
+    main.show_main_page()
+    main.show()
+    QtWidgets.QApplication.processEvents()
+
+    main.central_stack.setCurrentWidget(main.drag_browser)
+    QtWidgets.QApplication.processEvents()
+    assert main.image_viewer.isVisible() is False
+
+    _select_fake_bubble(main)
+    main.t_text_edit.setFocus()
+    QtWidgets.QApplication.processEvents()
+    assert main.window().focusWidget() is main.t_text_edit
+
+    _deselect_to_page(main)
+    QtWidgets.QApplication.processEvents()
+
+    fw = main.window().focusWidget()
+    assert fw is not main.s_combo
+    assert fw is not main.t_combo
+    assert fw is not main.set_all_button
+    assert fw is not main.t_text_edit  # sorti de la page Bulle (masquée)
+
+
+# --- Robustesse : repli du shell => aucun observateur installé, aucune erreur -------------------
+
+
+def test_no_context_watcher_installed_when_shell_falls_back(qtbot, monkeypatch):
+    monkeypatch.setattr(
+        manifest,
+        "ALL_ZONES",
+        manifest.ALL_ZONES + (("BOGUS", ("nonexistent_widget_xyz",)),),
+    )
+
+    widget = ComicTranslateUI()
+    qtbot.addWidget(widget)
+
+    assert widget._shell_active is False
+    assert not hasattr(widget, "_shell_context_watcher")
+    assert not hasattr(widget, "_shell_context_watchdog")
+    assert not hasattr(widget, "_shell_panel") or widget._shell_panel is None
+
+
+# --- Coût du chien de garde : un tick ne doit rien faire de coûteux (pas de disque, pas de rendu) --
+
+
+def test_watchdog_tick_cost_is_cheap(main):
+    import statistics
+    import time
+
+    _show_main_with_viewer(main)
+    watcher = main._shell_context_watcher
+
+    durations = []
+    for _ in range(50):
+        start = time.perf_counter()
+        watcher.evaluate_now()
+        durations.append(time.perf_counter() - start)
+
+    median_ms = statistics.median(durations) * 1000
+    print(f"[mesure shell 2c] chien de garde : médiane {median_ms:.4f} ms sur 50 ticks")
+    assert median_ms < 5.0  # large marge : un tick ne fait que lire deux combos + comparer un index
+
+
+# --- Non-écriture : aucune trace, dans le code du paquet, d'une écriture interdite ---------------
+
+
+def test_shell_watcher_and_panel_never_write_forbidden_targets():
+    """Analyse AST (pas un grep textuel, qui mordrait sur les docstrings qui *décrivent* la
+    règle) en complément de `test_context_switches_do_not_write_field_contents_or_scene_state`
+    (comportemental) : aucun appel `*.setPlainText(...)`/`*.insertPlainText(...)`/`*.clear()`, et
+    aucune affectation `*.curr_tblock = ...`/`*.curr_tblock_item = ...`, dans le code réel de
+    `modules/shell/watcher.py`/`modules/shell/panel.py` — seuls les deux libellés dynamiques de la
+    page Bulle (`bubble_source_caption`/`bubble_target_caption`) peuvent recevoir `.setText(...)`."""
+    import ast
+
+    forbidden_calls = {"setPlainText", "insertPlainText", "clear"}
+    forbidden_assign_attrs = {"curr_tblock", "curr_tblock_item"}
+
+    for module in (watcher_module, panel_module):
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in forbidden_calls, (
+                    f"{module.__name__}: appel interdit .{node.func.attr}(...) à la ligne "
+                    f"{node.lineno}"
+                )
+                if node.func.attr == "setText":
+                    target = node.func.value
+                    target_name = getattr(target, "attr", None) or getattr(target, "id", None)
+                    assert target_name in ("bubble_source_caption", "bubble_target_caption"), (
+                        f"{module.__name__}: .setText(...) inattendu sur {target_name!r} à la "
+                        f"ligne {node.lineno}"
+                    )
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Attribute):
+                        assert target.attr not in forbidden_assign_attrs, (
+                            f"{module.__name__}: affectation interdite .{target.attr} = ... à la "
+                            f"ligne {node.lineno}"
+                        )

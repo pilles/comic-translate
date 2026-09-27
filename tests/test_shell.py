@@ -13,8 +13,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
 from modules.shell import manifest
-from modules.shell.context import language_caption
+from modules.shell.context import CONTEXT_BUBBLE, CONTEXT_PAGE, language_caption, panel_context
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -61,6 +63,26 @@ def test_language_caption_with_text():
 def test_language_caption_empty_combo_text_falls_back_to_prefix():
     assert language_caption("Source", "") == "Source"
     assert language_caption("Source", "   ") == "Source"
+
+
+# --- context.panel_context (table de vérité, sous-étape 2c) ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("curr_tblock", "curr_tblock_item", "search_visible", "expected"),
+    [
+        (None, None, False, CONTEXT_PAGE),
+        ("blk", None, False, CONTEXT_BUBBLE),
+        (None, "item", False, CONTEXT_BUBBLE),
+        ("blk", "item", False, CONTEXT_BUBBLE),
+        (None, None, True, CONTEXT_BUBBLE),
+        ("blk", None, True, CONTEXT_BUBBLE),
+        (None, "item", True, CONTEXT_BUBBLE),
+        ("blk", "item", True, CONTEXT_BUBBLE),
+    ],
+)
+def test_panel_context_truth_table(curr_tblock, curr_tblock_item, search_visible, expected):
+    assert panel_context(curr_tblock, curr_tblock_item, search_visible) == expected
 
 
 # --- Aucun import PySide6 (paquet pur) ---------------------------------------------------------

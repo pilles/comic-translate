@@ -786,6 +786,52 @@ que l'interrupteur webtoon). Suites : 248 passed hors GUI ; `--gui` 346 passed, 
 `task_runner.py`) décidée par Philippe le 2026-09-27, livraison à venir (commit séparé) — garde-fou :
 ne jamais se déclencher pendant l'exécution d'un lot, comparaison du rappel par `==`.
 
+**Amendement 2026-09-28 — sous-étape 2c livrée, jalon 2 clos** : panneau de droite contextuel,
+`panel.py` réécrit — `QStackedWidget` à deux pages : **Page** (rien de sélectionné : Langue source
++ `s_combo`, Langue cible + `t_combo`, `set_all_button`, aide « Sélectionnez une bulle pour voir son
+texte ») et **Bulle** (une bulle sélectionnée : `QSplitter` vertical « <langue> · reconnu » +
+`s_text_edit` / « <langue> · traduction » + `t_text_edit`, bouton Historique). « Rendu du texte » et
+« Outils » restent communs, sous la pile (double usage inchangé : sans sélection, ils règlent le
+prochain « Rendre »).
+
+`modules/shell/context.py` (pur) : `panel_context(curr_tblock, curr_tblock_item, search_visible)`
+→ `CONTEXT_PAGE` / `CONTEXT_BUBBLE`. `modules/shell/watcher.py` (nouveau, importe PySide6) :
+`_ContextWatcher` bascule `panel.stack` — déclencheurs `image_viewer.rectangle_selected`,
+`image_viewer.clear_text_edits`, `page_list.currentItemChanged`, filtre de relâchement de souris sur
+le viewport, filtre Show/Hide sur `search_panel`, regroupés par `QTimer.singleShot(0)` (un seul en
+attente à la fois) ; chien de garde à 200 ms qui rattrape les affectations directes sans signal
+(`curr_tblock`/`curr_tblock_item` posés par ~20 sites de contrôleurs) — sort immédiatement si le
+panneau n'est pas visible, coût mesuré médiane 0,0023 ms/tick. `setCurrentIndex` appelé seulement au
+changement d'index ; les deux libellés de langue (page Bulle) sont relus à chaque évaluation (pas de
+signal fiable sur `s_combo`/`t_combo`, changés sous `blockSignals`).
+
+**Règle de focus** (condition du critic) : avant tout `setCurrentIndex`, lecture de
+`window().focusWidget()` — jamais `QApplication.focusWidget()`, qui renvoie `None` quand
+l'application est inactive et masquerait justement le cas à traiter. Si le focus est dans la section
+sortante → `image_viewer.setFocus()` (ou `clearFocus()` si la vue est cachée, le focus tombe alors à
+`None`, jamais sur une liste de langue) ; le shell ne donne jamais lui-même le focus à la section
+entrante. Évite qu'Espace sur « Set for all » écrase les langues de tout l'album, ou qu'une lettre
+tapée change la langue source. Recherche Ctrl+F : `setFocus` sur un champ de la page cachée de la
+pile est accepté par Qt et restitué à la bascule (vérifié par test) — `app/.../search_replace.py`
+non touché.
+
+Zéro ligne amont. Champs texte en contexte Bulle : 161/160 px à 1225×797 (136 en 2a, 120 avant les
+sous-étapes du jalon 2). Tests : `tests/test_shell.py` 15 (hors GUI), `tests/test_shell_ui.py` ~75
+(`--gui`, dont une analyse AST de non-écriture, un chien de garde qui rattrape les affectations
+directes sans signal, le focus en fenêtre inactive, et le cas écran vide). Suites : 263 passed hors
+GUI ; `--gui` (`.venv/bin/python -m pytest`) 385 passed, 3 skipped, 1 failed (`test_app.py`, amont
+connu).
+
+Piège d'outillage (ajouté à `CLAUDE.md`) : le hook de formatage (`ruff --fix` en `PostToolUse`)
+supprime un import ajouté dans une édition et utilisé seulement dans une édition suivante — ajouter
+l'import et son premier usage dans la **même** édition, et vérifier par `grep` après coup. Autre
+piège : les tests du chien de garde exigent la fenêtre affichée (`main.show()`), sinon il sort
+immédiatement par construction (garde `panel.stack.isVisible()`).
+
+**Jalon 2 clos** (2a, 2b, 2b-bis, 2c livrées, validation manuelle de Philippe reçue pour 2b et 2c le
+2026-09-28). Reporté, toujours ouvert : « source jamais vidée » (annotation 4 de la maquette ;
+défauts amont `image.py:1131`, `text.py:929`, `rect_item.py:62-63`, non corrigés).
+
 ## ADR-016 — Analyse du texte sur l'image d'origine (hotfix)
 
 Date : 2026-09-27

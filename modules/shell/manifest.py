@@ -12,8 +12,9 @@ Chaque nom apparaît dans exactement une zone (`tests/test_shell.py` le vérifie
 - HEADER / PROGRESS : bandeau supérieur pleine largeur, identique à l'amont.
 - LEFT / CENTER / OVERLAY : les trois colonnes du `QSplitter` central (le badge Original est
   hors flux, positionné par-dessus le centre).
-- PAGE / BUBBLE : section provisoire du panneau de droite (pas encore une pile Page/Bulle en 2a,
-  voir `modules/shell/panel.py`).
+- PAGE / BUBBLE : les deux pages de la pile Page/Bulle du panneau de droite
+  (`QStackedWidget`, `modules/shell/panel.py`), basculée par `modules/shell/watcher.py` selon
+  `modules/shell/context.panel_context` (spec 04, jalon 2, sous-étape 2c).
 - RENDER / TOOLS : les deux groupes du bas du panneau de droite.
 - PARKED : rangé hors du flux visible, masqué explicitement (`setVisible(False)`, y compris en
   repli) — `manual_radio`/`automatic_radio`/`webtoon_toggle` (spec 04, jalon 2, sous-étape 2b :

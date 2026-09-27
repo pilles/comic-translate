@@ -1,17 +1,14 @@
-"""Panneau de droite (spec 04, jalon 2, sous-étape 2a). Construit la disposition provisoire —
-section unique Page+Bulle, groupe « Rendu du texte », groupe « Outils » — sans toucher un seul
-widget amont : ce module ne fait que fabriquer des conteneurs, des layouts vides et des libellés
-neufs. Le remplissage (widgets amont réels) est fait par `modules/shell/layout.py`, qui reçoit le
-squelette renvoyé par `build_panel_skeleton` et y insère les widgets déplacés.
+"""Panneau de droite (spec 04, jalon 2, sous-étape 2c). Construit la pile Page/Bulle
+(`QStackedWidget`) du haut du panneau, plus les groupes « Rendu du texte » et « Outils » en bas,
+communs aux deux contextes (les réglages de rendu ont un double usage : sans sélection, ils
+règlent le prochain « Rendre », `app/controllers/text.py:~925-1003`) — sans toucher un seul widget
+amont : ce module ne fait que fabriquer des conteneurs, des layouts vides et des libellés neufs.
+Le remplissage (widgets amont réels) est fait par `modules/shell/layout.py`, qui reçoit le
+squelette renvoyé par `build_panel_skeleton` et y insère les widgets déplacés. La bascule entre les
+deux pages de la pile est pilotée par `modules/shell/watcher.py`, jamais par ce module (qui ne
+construit qu'un état initial : la page « Page », index 0, affichée en premier).
 
-Importe PySide6 — n'importer ce module que depuis `modules/shell/layout.py`.
-
-Préparation de la sous-étape 2c (pile Page/Bulle) : `PanelSkeleton.source_layout`/`target_layout`
-accueillent aujourd'hui à la fois les widgets « Page » (`s_combo`/`t_combo`) et « Bulle »
-(`s_text_edit`/`t_text_edit`) dans une seule section visible en permanence. En 2c, cette section
-unique deviendra une pile (`QStackedWidget`) avec une vue Page et une vue Bulle distinctes ; les
-noms de champs ci-dessous sont déjà séparés en conséquence pour que ce jalon n'ait pas à réécrire
-`layout.py`."""
+Importe PySide6 — n'importer ce module que depuis `modules/shell/layout.py`."""
 
 from __future__ import annotations
 
@@ -21,53 +18,61 @@ from typing import Any
 from PySide6 import QtCore, QtWidgets
 
 from app.ui.dayu_widgets.divider import MDivider
+from app.ui.dayu_widgets.label import MLabel
 
-_SOURCE_LABEL = "Source"
-_TARGET_LABEL = "Traduction"
+_SOURCE_LANG_LABEL = "Langue source"
+_TARGET_LANG_LABEL = "Langue cible"
+_HINT_LABEL = "Sélectionnez une bulle pour voir son texte"
 _RENDER_GROUP_LABEL = "Rendu du texte"
 _TOOLS_GROUP_LABEL = "Outils"
 
 _RIGHT_PANEL_MIN_WIDTH = 280
-_TOP_SPLITTER_STRETCH = 1
+_TOP_STACK_STRETCH = 1
 
-# Espacements resserrés (correctif hauteur des champs texte, retour tester) : le panneau est
+# Espacements resserrés (correctif hauteur des champs texte, retour tester 2a) : le panneau est
 # étroit (280 px) et dense — mêmes ordres de grandeur que `app/ui/search_replace_panel.py`
 # (colonne voisine dans le même splitter gauche), qui utilise déjà marges/espacements 0-6 px.
 _PANEL_MARGIN = 6
 _PANEL_SPACING = 4
 _PANE_SPACING = 4
-_COMBO_ROW_SPACING = 6
+_ROW_SPACING = 6
 
 
 @dataclass
 class PanelSkeleton:
     """Squelette vide du panneau de droite : conteneur prêt à afficher, et les layouts où
-    `modules/shell/layout.py` doit encore insérer les widgets amont (dans cet ordre, pour chacun)."""
+    `modules/shell/layout.py` doit encore insérer les widgets amont (dans cet ordre, pour chacun).
+
+    `stack`/`page_index`/`bubble_index` : pile Page/Bulle du haut du panneau, basculée par
+    `modules/shell/watcher.py` — jamais par ce module ni par `layout.py`."""
 
     container: QtWidgets.QWidget
 
-    # Section Page/Bulle provisoire (2a : une seule section, voir docstring de module). Le
-    # libellé et la liste de langue partagent une rangée (correctif hauteur des champs texte,
-    # retour tester du 2026-09-26) : seule cette rangée a une hauteur fixe, le champ texte
-    # absorbe tout le reste de l'espace de son volet du `QSplitter` vertical.
-    source_combo_row: (
+    stack: QtWidgets.QStackedWidget
+    page_index: int
+    bubble_index: int
+
+    # Page (rien de sélectionné).
+    page_source_lang_row: (
         QtWidgets.QHBoxLayout
-    )  # reçoit : label « Source » (déjà posé), s_combo (stretch)
-    source_layout: (
-        QtWidgets.QVBoxLayout
-    )  # reçoit : s_text_edit (stretch) — la rangée ci-dessus est déjà posée (item 0)
-    target_combo_row: (
+    )  # reçoit : label « Langue source » (déjà posé), s_combo (stretch)
+    page_target_lang_row: (
         QtWidgets.QHBoxLayout
-    )  # reçoit : label « Traduction » (déjà posé), t_combo (stretch)
-    target_layout: (
-        QtWidgets.QVBoxLayout
-    )  # reçoit : t_text_edit (stretch) — la rangée ci-dessus est déjà posée (item 0)
-    actions_layout: (
-        QtWidgets.QHBoxLayout
-    )  # reçoit : block_history_button, set_all_button, puis un stretch
+    )  # reçoit : label « Langue cible » (déjà posé), t_combo (stretch)
+    page_actions_row: QtWidgets.QHBoxLayout  # reçoit : set_all_button, puis un stretch
+
+    # Bulle (une bulle sélectionnée). Libellés dynamiques (`bubble_source_caption`/
+    # `bubble_target_caption`) : texte initial neutre, réécrit par `modules/shell/watcher.py` à
+    # chaque évaluation du contexte (pas de signal fiable sur `s_combo`/`t_combo`, voir
+    # `modules/shell/context.py`).
+    bubble_source_caption: QtWidgets.QLabel
+    bubble_source_layout: QtWidgets.QVBoxLayout  # reçoit : s_text_edit (stretch) — libellé posé
+    bubble_target_caption: QtWidgets.QLabel
+    bubble_target_layout: QtWidgets.QVBoxLayout  # reçoit : t_text_edit (stretch) — libellé posé
+    bubble_actions_row: QtWidgets.QHBoxLayout  # reçoit : block_history_button, puis un stretch
 
     # Groupe « Rendu du texte ». Le nom de police est seul sur sa rangée (correctif troncature,
-    # retour tester : partagée avec les deux menus de taille fixe (60 px chacun), elle n'avait
+    # retour tester 2a : partagée avec les deux menus de taille fixe (60 px chacun), elle n'avait
     # plus assez de largeur dans les 280 px du panneau pour afficher un nom de police complet).
     font_name_row_layout: QtWidgets.QHBoxLayout  # font_dropdown seul, pleine largeur
     font_size_row_layout: QtWidgets.QHBoxLayout  # font_size_dropdown, line_spacing_dropdown
@@ -90,23 +95,30 @@ class PanelSkeleton:
     tools_row3_layout: QtWidgets.QHBoxLayout  # brush_eraser_slider
 
 
-def _combo_row_pane(
-    label_text: str,
-) -> tuple[QtWidgets.QWidget, QtWidgets.QHBoxLayout, QtWidgets.QVBoxLayout]:
-    """Volet de `top_splitter` : une rangée fixe (libellé + emplacement du menu de langue), puis
-    le champ texte (ajouté plus tard par `layout.py`, stretch=1) qui absorbe le reste du volet."""
+def _label_row(label_text: str) -> QtWidgets.QHBoxLayout:
+    """Rangée fixe : un libellé statique, puis le widget amont (ajouté plus tard par
+    `layout.py`, stretch=1)."""
+    row = QtWidgets.QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(_ROW_SPACING)
+    row.addWidget(QtWidgets.QLabel(label_text))
+    return row
+
+
+def _caption_pane(
+    initial_caption: str,
+) -> tuple[QtWidgets.QWidget, QtWidgets.QLabel, QtWidgets.QVBoxLayout]:
+    """Volet du `QSplitter` Bulle : un libellé dynamique, puis le champ texte (ajouté plus tard
+    par `layout.py`, stretch=1) qui absorbe le reste du volet."""
     pane = QtWidgets.QWidget()
     pane_layout = QtWidgets.QVBoxLayout(pane)
     pane_layout.setContentsMargins(0, 0, 0, 0)
     pane_layout.setSpacing(_PANE_SPACING)
 
-    combo_row = QtWidgets.QHBoxLayout()
-    combo_row.setContentsMargins(0, 0, 0, 0)
-    combo_row.setSpacing(_COMBO_ROW_SPACING)
-    combo_row.addWidget(QtWidgets.QLabel(label_text))
-    pane_layout.addLayout(combo_row)
+    caption = QtWidgets.QLabel(initial_caption)
+    pane_layout.addWidget(caption)
 
-    return pane, combo_row, pane_layout
+    return pane, caption, pane_layout
 
 
 def build_panel_skeleton(main: Any) -> PanelSkeleton:
@@ -118,18 +130,52 @@ def build_panel_skeleton(main: Any) -> PanelSkeleton:
     panel_layout.setContentsMargins(_PANEL_MARGIN, _PANEL_MARGIN, _PANEL_MARGIN, _PANEL_MARGIN)
     panel_layout.setSpacing(_PANEL_SPACING)
 
-    top_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+    stack = QtWidgets.QStackedWidget()
 
-    source_pane, source_combo_row, source_layout = _combo_row_pane(main.tr(_SOURCE_LABEL))
-    target_pane, target_combo_row, target_layout = _combo_row_pane(main.tr(_TARGET_LABEL))
+    # --- Page (rien de sélectionné) ---------------------------------------------------------
+    page_widget = QtWidgets.QWidget()
+    page_layout = QtWidgets.QVBoxLayout(page_widget)
+    page_layout.setContentsMargins(0, 0, 0, 0)
+    page_layout.setSpacing(_PANE_SPACING)
 
-    top_splitter.addWidget(source_pane)
-    top_splitter.addWidget(target_pane)
-    top_splitter.setStretchFactor(0, 1)
-    top_splitter.setStretchFactor(1, 1)
+    page_source_lang_row = _label_row(main.tr(_SOURCE_LANG_LABEL))
+    page_target_lang_row = _label_row(main.tr(_TARGET_LANG_LABEL))
+    page_actions_row = QtWidgets.QHBoxLayout()
 
-    actions_layout = QtWidgets.QHBoxLayout()
+    hint_label = MLabel(main.tr(_HINT_LABEL)).secondary()
+    hint_label.setWordWrap(True)
 
+    page_layout.addLayout(page_source_lang_row)
+    page_layout.addLayout(page_target_lang_row)
+    page_layout.addLayout(page_actions_row)
+    page_layout.addWidget(hint_label)
+    page_layout.addStretch(1)
+
+    # --- Bulle (une bulle sélectionnée) ------------------------------------------------------
+    bubble_widget = QtWidgets.QWidget()
+    bubble_layout = QtWidgets.QVBoxLayout(bubble_widget)
+    bubble_layout.setContentsMargins(0, 0, 0, 0)
+    bubble_layout.setSpacing(_PANE_SPACING)
+
+    bubble_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+    source_pane, bubble_source_caption, bubble_source_layout = _caption_pane("")
+    target_pane, bubble_target_caption, bubble_target_layout = _caption_pane("")
+    bubble_splitter.addWidget(source_pane)
+    bubble_splitter.addWidget(target_pane)
+    bubble_splitter.setStretchFactor(0, 1)
+    bubble_splitter.setStretchFactor(1, 1)
+
+    bubble_actions_row = QtWidgets.QHBoxLayout()
+
+    bubble_layout.addWidget(bubble_splitter, 1)
+    bubble_layout.addLayout(bubble_actions_row)
+
+    stack.addWidget(page_widget)
+    stack.addWidget(bubble_widget)
+    page_index = stack.indexOf(page_widget)
+    bubble_index = stack.indexOf(bubble_widget)
+
+    # --- Rendu du texte / Outils (communs aux deux contextes, sous la pile) -------------------
     font_name_row_layout = QtWidgets.QHBoxLayout()
     font_size_row_layout = QtWidgets.QHBoxLayout()
     style_row_layout = QtWidgets.QHBoxLayout()
@@ -151,8 +197,7 @@ def build_panel_skeleton(main: Any) -> PanelSkeleton:
 
     tools_row3_layout = QtWidgets.QHBoxLayout()
 
-    panel_layout.addWidget(top_splitter, _TOP_SPLITTER_STRETCH)
-    panel_layout.addLayout(actions_layout)
+    panel_layout.addWidget(stack, _TOP_STACK_STRETCH)
     panel_layout.addWidget(MDivider(main.tr(_RENDER_GROUP_LABEL)))
     panel_layout.addLayout(font_name_row_layout)
     panel_layout.addLayout(font_size_row_layout)
@@ -165,11 +210,17 @@ def build_panel_skeleton(main: Any) -> PanelSkeleton:
 
     return PanelSkeleton(
         container=container,
-        source_combo_row=source_combo_row,
-        source_layout=source_layout,
-        target_combo_row=target_combo_row,
-        target_layout=target_layout,
-        actions_layout=actions_layout,
+        stack=stack,
+        page_index=page_index,
+        bubble_index=bubble_index,
+        page_source_lang_row=page_source_lang_row,
+        page_target_lang_row=page_target_lang_row,
+        page_actions_row=page_actions_row,
+        bubble_source_caption=bubble_source_caption,
+        bubble_source_layout=bubble_source_layout,
+        bubble_target_caption=bubble_target_caption,
+        bubble_target_layout=bubble_target_layout,
+        bubble_actions_row=bubble_actions_row,
         font_name_row_layout=font_name_row_layout,
         font_size_row_layout=font_size_row_layout,
         style_row_layout=style_row_layout,
