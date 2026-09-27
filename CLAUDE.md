@@ -166,8 +166,8 @@ enregistrées avant ce correctif ne sont pas modifiées.
   `image_states` d'une autre à la navigation suivante (ADR-014, non reproduit en réel).
 - Même défaut hors lot sur les opérations multi-pages (Reconnaître/Traduire/Détecter sur sélection,
   `context["current_file"]` périmé si on navigue pendant l'opération, ADR-014).
-- `_batch_active` peut rester bloqué à `True` si un lot mis en file derrière un autosave est annulé
-  avant de démarrer (`on_batch_process_finished` jamais appelé, ADR-014).
+- ~~`_batch_active` bloqué à `True` après un lot annulé avant démarrage~~ : **corrigé dans le fork**
+  (`task_runner.py`, 2b-bis, ADR-019) — candidat PR amont.
 - Page insérée puis traitée par lot : `viewer.load_state` lève `KeyError` sur `state['rectangles']`
   au chargement suivant (`viewer_state` incomplet laissé par le lot, ADR-014, touchera le jalon 4
   de la spec 04).

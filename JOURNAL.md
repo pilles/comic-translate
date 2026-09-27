@@ -1,5 +1,18 @@
 # JOURNAL
 
+## 2026-09-27 (troisième passage) — Spec 04 jalon 2 (2b-bis) : défaut amont n°3 corrigé
+
+- Décision de Philippe : corriger (plutôt que contourner ou laisser). `app/controllers/task_runner.py`,
+  10 lignes `# fork:` : mémorisation de l'opération en cours ; à l'annulation, un lot resté en file
+  est terminé par `on_batch_process_finished` planifié, sauf si un lot tourne déjà ou à la
+  fermeture. Comparaison des rappels par `==` (prouvé par mutation). ADR-019.
+- Tests : `tests/test_batch_cancel_before_start.py`, 7 tests hors GUI en sous-processus. Suites :
+  255 passed hors GUI ; `--gui` (`.venv/bin/python -m pytest`) 353 passed, 3 skipped, 1 failed
+  (`test_app.py`, amont connu).
+- Commentaire amont ramené de 5 à 2 lignes par l'orchestrateur (surface de rebase).
+- Reste à faire du jalon 2 : **2c** (panneau contextuel Page/Bulle, règle de focus lue sur
+  `window().focusWidget()` avant `setCurrentIndex`, test « fenêtre inactive »).
+
 ## 2026-09-27 (second passage) — Spec 04 jalon 2 (2b), hotfix sauts de ligne, plantage natif PySide6
 
 - **Hotfix commité (`566740b`)** : retours à la ligne renvoyés par le modèle de traduction. Cas réel

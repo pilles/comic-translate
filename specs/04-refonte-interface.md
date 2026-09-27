@@ -190,10 +190,11 @@ projet. Rien de neuf, rien de cassé.
 > 346 passed, 3 skipped, 1 failed (`test_app.py`, amont connu). Détail : ADR-015 (amendement),
 > `specs/decisions.md`.
 >
-> **2b-bis : décidée (corriger), livraison à venir.** Philippe a tranché le 2026-09-27 : corriger le
+> **2b-bis : livrée le 2026-09-27** (ADR-019 : `task_runner.py`, 10 lignes `# fork:`, 7 tests hors GUI).
+> Historique de la décision : Philippe a tranché le 2026-09-27 : corriger le
 > défaut amont n°3 (ADR-014, `_batch_active` bloqué à `True`) par 3 lignes dans `task_runner.py`,
 > garde-fou « ne jamais se déclencher pendant l'exécution d'un lot », comparaison du rappel par
-> `==`. Pas encore livré, commit séparé à venir.
+> `==`. (Livré avec 10 lignes au lieu de 3 : mémorisation de l'opération en cours nécessaire au garde-fou.)
 >
 > **2c inchangée** (pile Page/Bulle, règle de focus).
 >

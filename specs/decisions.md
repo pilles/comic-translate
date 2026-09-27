@@ -884,3 +884,42 @@ les rapports du crash reporter système ont suffi au diagnostic.
   apparaît un jour en usage réel.
 - `test_pagestate_ui.py::test_watchdog_tick_median_cost_under_one_millisecond` peut échouer sous
   charge (mesure de temps CPU), passe isolé — sans rapport avec ce défaut, à ne pas confondre.
+
+## ADR-019 — Défaut amont n°3 corrigé : fin d'un lot annulé avant démarrage
+
+**Date** : 2026-09-27. **Statut** : accepté (décision de Philippe, spec 04 jalon 2, sous-étape 2b-bis).
+
+**Contexte.** Défaut amont n°3 (ADR-014) : un lot mis en file derrière une autre opération
+(typiquement un autosave) puis annulé avant d'avoir démarré. `cancel_current_task` vide la file ;
+le `finished_callback` du lot (`on_batch_process_finished`) n'est donc jamais appelé et
+`_batch_active` reste `True` pour toute la session : Translate All et Cancel grisés, étapes grisées
+(depuis la 2b), barre de progression affichée, sauvegarde automatique coupée en silence
+(`autosave_project` sort tant que `_batch_active`). Avant la 2b, la radio Automatique servait
+d'issue de secours ; elle a disparu.
+
+**Décision.** Corriger dans `app/controllers/task_runner.py` (10 lignes `# fork:`) :
+`_process_next_operation` mémorise l'opération en cours (`self._current_operation`) ;
+`cancel_current_task` repère, avant de vider la file, un lot en file (`finished_callback ==
+main.on_batch_process_finished`) et, après, planifie `on_batch_process_finished` par
+`QTimer.singleShot(0, main, …)` — sauf si l'opération en cours est elle-même un lot (il se
+terminera seul ; déclencher provoquerait une fin prématurée pendant l'inférence et une double
+finalisation du rapport) ou si la fenêtre se ferme (`main._is_shutting_down`, posé par `shutdown()`
+avant `cancel_current_task`). Le lot annulé se termine alors comme un lot annulé à la première
+page : rapport « annulé », indicateurs remis à zéro, boutons rendus, autosave rétablie.
+
+**Pièges évités (critic).** Comparaison des rappels par `==`, jamais `is` (méthodes liées : deux
+accès donnent deux objets distincts) — prouvé par mutation, le test échoue avec `is`.
+`threadpool.activeThreadCount()` écarté comme critère « lot en cours » (vignettes et autosave le
+faussent).
+
+**Options rejetées.** Contournement sans ligne amont (minuteur dans le shell qui détecte l'état
+bloqué) : un module d'interface aurait piloté un état de contrôleur par scrutation. Laisser tel
+quel : plus d'issue sans redémarrage depuis la 2b.
+
+**Conséquences.** `tests/test_batch_cancel_before_start.py` (7 tests hors GUI, chacun en
+sous-processus avec sa propre `QCoreApplication` et un faux `main` `QObject`, pour ne pas polluer
+le singleton Qt de la suite `--gui`). Limite connue : entre la fin d'une opération et le
+démarrage de la suivante (quelques tours de boucle d'événements), `_current_operation` désigne
+encore l'opération terminée ; une annulation dans cette fenêtre pourrait être mal classée — cas
+marginal, non aggravant. Candidat PR amont. Défaut n°3 retiré de la liste des défauts ouverts de
+`CLAUDE.md`.

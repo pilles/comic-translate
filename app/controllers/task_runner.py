@@ -17,6 +17,7 @@ class TaskRunnerController:
         self.main = main
         self.operation_queue = deque()
         self.is_processing_queue = False
+        self._current_operation = None  # fork: opération en cours (défaut amont n°3, ADR-019)
 
     def run_threaded(
         self,
@@ -65,6 +66,7 @@ class TaskRunnerController:
 
         self.is_processing_queue = True
         operation = self.operation_queue.popleft()
+        self._current_operation = operation  # fork: opération en cours (défaut amont n°3, ADR-019)
 
         def enhanced_finished_callback():
             if operation["finished_callback"]:
@@ -152,8 +154,16 @@ class TaskRunnerController:
                 QCoreApplication.translate("Messages", "Cancelling... %p%")
             )
 
+        # fork: défaut amont n°3 (ADR-019) : un lot annulé avant démarrage n'appelait jamais on_batch_process_finished
+        # fork: (_batch_active bloqué) ; on le termine, sauf si un lot tourne déjà (il se termine seul) ou à la fermeture.
+        pending_batch = any(op["finished_callback"] == self.main.on_batch_process_finished for op in self.operation_queue)  # fork: lot repéré en file
+        running_batch = self._current_operation is not None and self._current_operation["finished_callback"] == self.main.on_batch_process_finished  # fork: lot déjà en cours
+
         self.clear_operation_queue()
         self.is_processing_queue = False
+
+        if pending_batch and not running_batch and not getattr(self.main, "_is_shutting_down", False):  # fork: cf. commentaire ci-dessus
+            QtCore.QTimer.singleShot(0, self.main, self.main.on_batch_process_finished)  # fork: termine le lot annulé avant démarrage
 
     def run_finish_only(
         self, finished_callback: Callable, error_callback: Callable = None
