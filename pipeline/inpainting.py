@@ -812,7 +812,7 @@ class InpaintingHandler:
             self.main_page.apply_inpaint_patches(patch_list)
         
         self.main_page.image_viewer.clear_brush_strokes() 
-        self.main_page.undo_group.activeStack().endMacro()  
+        # fork: macro fermée par l'appelant (modules.undo_guard.macro.page_bound), pas ici (option D, ADR-021)
         # get_best_render_area(self.main_page.blk_list, original_image, inpainted)    
 
     def get_inpainted_patches(self, mask: np.ndarray, inpainted_image: np.ndarray):

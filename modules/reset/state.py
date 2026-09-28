@@ -220,8 +220,8 @@ ABORTED_AFTER_CONFIRMATION_MESSAGE = (
 )
 
 _ORPHAN_MACRO_CONFIRMATION_TEXT = (
-    "L'historique d'annulation de cette page est bloqué par une opération interrompue "
-    "(nettoyage ou segmentation). La réinitialisation ne pourra pas être annulée."
+    "L'historique d'annulation de cette page est bloqué par une opération interrompue. "
+    "La réinitialisation ne pourra pas être annulée."
 )
 
 

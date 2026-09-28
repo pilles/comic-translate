@@ -107,6 +107,14 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   `push`/`beginMacro`/`endMacro`/`mark_project_dirty` dans `redo`/`undo`. `state.py` pur ;
   `ui.py` seul fichier du paquet à importer PySide6, importé **uniquement** depuis `controller.py`.
   Détail : ADR-020.
+- `modules/undo_guard/` — macros d'annulation du nettoyage et de la segmentation page seule/multi-
+  pages (spec 04, sous-étape 3a-bis) : `macro.py` (pur) — `in_macro(main, name, fn)` ouvre/exécute/
+  ferme la macro **dans le même appel synchrone**, jamais au clic ; `page_bound(main, name, fn,
+  notify)` capture page + pile au clic, abandonne le résultat (message) si la page affichée ou sa
+  pile a changé au moment du succès. `ui.py` (seul fichier à importer PySide6) : verrou
+  `main._undo_locked_by` posé au clic/levé au rappel de fin + filet 250 ms, `guard_cleaning`,
+  `guard_segmentation`, `install_undo_guard`. Importé uniquement depuis `controller.py`. Détail :
+  ADR-021.
 
 ## Traduction locale (Ollama)
 
@@ -150,6 +158,21 @@ sinon tout le fichier apparaît modifié dans le diff.
 par le modèle par une espace avant d'écrire `blk.translation` — c'est au rendu de couper le texte
 selon la largeur de la bulle, jamais au modèle (hotfix `566740b`, ADR-017). Les traductions déjà
 enregistrées avant ce correctif ne sont pas modifiées.
+
+## Règle « macro d'annulation autour d'un traitement asynchrone »
+
+Toute macro d'annulation autour d'un traitement asynchrone (worker Qt) passe par
+`modules/undo_guard` — ouverte **dans le rappel de résultat**, jamais au clic (ADR-021). Ne jamais
+appeler `setEnabled` sur un `MToolButton` (dayu) dans du code du fork : c'est le chemin exact du
+plantage natif PySide6/Shiboken6 de l'ADR-018 (`MToolButton.changeEvent` crée un
+`QGraphicsOpacityEffect`) ; verrouiller par filtre d'événements + infobulle à la place.
+
+**Pièges de test rencontrés (undo_guard)** : une exception qui atteint `default_error_handler`
+ouvre une vraie `QMessageBox.exec()` qui bloque indéfiniment la suite en offscreen — neutraliser
+`Messages.show_error_with_copy` dans la fixture ; ne jamais laisser tourner le vrai modèle
+(LaMa/ONNX) dans un test GUI, stubber `pipeline.inpaint` ; `app/ui/dayu_widgets/menu.py:300` lève
+parfois `AttributeError ... pixelMetric` en offscreen (bruit sans rapport) ; ne jamais lancer deux
+suites `--gui` en parallèle.
 
 ## Interdits
 
@@ -195,9 +218,15 @@ enregistrées avant ce correctif ne sont pas modifiées.
   bug **PySide6/Shiboken6 6.11.2** (`QGraphicsOpacityEffect` créé pendant la dépêche d'un autre
   événement, `dayu_widgets/tool_button.py:57`), pas du fork. Ne se reproduit pas sous
   `.venv/bin/python -m pytest` (voir commande ci-dessus), ni sous `COMIC_SHELL=0`. Détail : ADR-018.
-- Macro d'annulation orpheline après un nettoyage/segmentation en échec ou une navigation pendant
-  l'opération (`endMacro` vise `activeStack()` à la fin, pas la pile de départ) — décidée par
-  Philippe, correction à venir (3a-bis, ADR-020).
+- ~~Macro d'annulation orpheline après un nettoyage/segmentation en échec ou une navigation pendant
+  l'opération~~ : **corrigé dans le fork** (`modules/undo_guard/`, 3a-bis, ADR-021) — macro ouverte
+  au résultat, jamais au clic.
+- Changement de page pendant Détecter/Reconnaître/Traduire page seule → résultat calculé sur A posé
+  sur la page affichée B (`context["current_file"]` périmé), pas encore couvert (défauts amont n°1
+  et n°2, ADR-014 ; seuls nettoyage et segmentation sont couverts par undo_guard, ADR-021).
+- Double planification de `_process_next_operation` après une erreur (`task_runner.py:71-79`) :
+  `is_processing_queue` peut repasser à faux pendant qu'une opération tourne encore — au pire le
+  filet à 250 ms d'`undo_guard` lève le verrou d'annulation un peu tôt (ADR-021, limite 5).
 - Annulations de texte (`TextEditCommand`, `RestoreVersionCommand`, `TextFormatCommand`) qui visent
   un item détruit après navigation ou reset de page → `RuntimeError` à l'annulation (MAJ1) —
   décidée par Philippe, correction à venir (3a-ter, ADR-020).

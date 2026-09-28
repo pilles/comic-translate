@@ -262,12 +262,20 @@ projet. Rien de neuf, rien de cassé.
 > 319 passed hors GUI ; `--gui` 487 passed, 3 skipped, 1 failed (`test_app.py`, amont connu). Détail
 > complet, limites (MAJ1 notamment) et alternatives rejetées : ADR-020 (`specs/decisions.md`).
 >
-> **3a-bis (décidée par Philippe le 2026-09-28, à venir)** : corriger la macro d'annulation
-> orpheline — défaut amont préexistant, indépendant du reset : la macro « inpaint »
-> (`manual_workflow.py:605`) n'est fermée qu'au succès (`pipeline/inpainting.py:815`), idem pour la
-> segmentation ; `endMacro` vise `activeStack()` à la fin de l'opération, donc une autre page si
-> l'utilisateur a navigué entre-temps → toute commande suivante sur cette pile tombe dans une macro
-> jamais fermée et Annuler est refusé jusqu'à la fermeture de l'app. Détail : ADR-020.
+> **3a-bis livrée le 2026-09-28, validée à la main par Philippe.** Défaut amont préexistant,
+> indépendant du reset : la macro « inpaint » (`manual_workflow.py:605`) n'était fermée qu'au
+> succès (`pipeline/inpainting.py:815`), idem pour la segmentation ; `endMacro` visait
+> `activeStack()` à la fin de l'opération, donc une autre page si l'utilisateur avait navigué
+> entre-temps → toute commande suivante sur cette pile tombait dans une macro jamais fermée et
+> Annuler était refusé jusqu'à la fermeture de l'app. Corrigé par `modules/undo_guard/` (option D :
+> la macro est désormais ouverte dans le rappel de succès, synchrone, jamais au clic) ; annulation
+> verrouillée pendant le calcul (raccourci refusé, boutons de la barre de titre avalés par un
+> filtre d'événements — jamais `setEnabled`, plantage natif ADR-018 évité, mesuré 4/40 → 0/40) ;
+> changement de page pendant le calcul → résultat abandonné + message. 24 lignes `# fork:` dans
+> 5 fichiers. Tests : `tests/test_undo_guard.py` (25, hors GUI), `tests/test_undo_guard_ui.py`
+> (17, `--gui`). Suites : 344 passed hors GUI ; `--gui` 529 passed, 3 skipped, 1 failed
+> (`test_app.py`, amont connu). Détail complet, limites et alternatives rejetées : ADR-021
+> (`specs/decisions.md`).
 >
 > **3a-ter (décidée par Philippe le 2026-09-28, à venir)** : rendre les annulations de texte
 > robustes aux items recréés (MAJ1 de l'ADR-020) — `TextEditCommand`, `RestoreVersionCommand`,

@@ -58,6 +58,7 @@ class ShortcutController:
             "restore_text_blocks": self._restore_text_blocks,
             "toggle_brush_strokes": self._toggle_brush_strokes,
         }
+        if shortcut_id in ("undo", "redo") and getattr(self.main, "_undo_locked_by", None) is not None: return  # fork: verrou nettoyage/segmentation (option D, modules.undo_guard, ADR-021)
         handler = handlers.get(shortcut_id)
         if handler is not None:
             handler()

@@ -8,6 +8,7 @@ from modules.detection.processor import TextBlockDetector
 from modules.ocr.processor import OCRProcessor
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
+from modules.undo_guard.ui import guard_cleaning, guard_segmentation
 from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
 from modules.utils.language_utils import get_language_code, is_no_space_lang
@@ -602,12 +603,12 @@ class ManualWorkflowController:
             self.main.text_ctrl.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
-            self.main.undo_group.activeStack().beginMacro("inpaint")
+            _guarded_result, _guarded_finished = guard_cleaning(self.main, self.main.pipeline.inpaint_complete, self.main.on_manual_finished)  # fork: verrou + macro liés à la page affichée, posés au clic (option D, undo_guard, ADR-021)
             self.main.run_threaded(
                 self.main.pipeline.inpaint,
-            self.main.pipeline.inpaint_complete,
+            _guarded_result,  # fork: résultat gardé (option D, undo_guard)
                 self.main.default_error_handler,
-                self.main.on_manual_finished,
+                _guarded_finished,  # fork: fin gardée, lève le verrou (option D, undo_guard)
             )
 
     def blk_detect_segment(
@@ -620,13 +621,13 @@ class ManualWorkflowController:
         else:
             blk_list, load_rects = result
         self.main.blk_list = blk_list
-        self.main.undo_group.activeStack().beginMacro("draw_segmentation_boxes")
+        # fork: macro ouverte par l'appelant (page_bound) — option D, undo_guard (ADR-021)
         image = self.main.image_viewer.get_image_array(include_patches=False)  # fork: analyse du texte sur l'original, sans patchs de nettoyage (hotfix 2026-09-27)
         for blk in self.main.blk_list:
             if blk.xyxy is not None:
                 stroke = self.main.image_viewer.drawing_manager.make_segmentation_stroke_data(blk, image)
                 self.main.image_viewer.draw_segmentation_lines(blk.xyxy, stroke=stroke)
-        self.main.undo_group.activeStack().endMacro()
+        # fork: macro fermée par l'appelant (page_bound) — option D, undo_guard (ADR-021)
 
     def load_segmentation_points(self) -> None:
         if self.main.image_viewer.hasPhoto():
@@ -641,7 +642,7 @@ class ManualWorkflowController:
 
             selected_paths = self._selected_page_paths()
             if len(selected_paths) > 1:
-                self.main.undo_group.activeStack().beginMacro("draw_segmentation_boxes")
+                # fork: plus de macro au clic ; verrou + macro posés par l'appelant du rappel (option D, undo_guard, ADR-021)
                 context = self._prepare_multi_page_context(selected_paths)
 
                 def compute_selected_bboxes() -> dict[str, tuple[list[TextBlock], list[dict]]]:
@@ -684,25 +685,23 @@ class ManualWorkflowController:
 
                     if results:
                         self.main.mark_project_dirty()
-                    self.main.undo_group.activeStack().endMacro()
+                    # fork: macro fermée par l'appelant (in_macro) — option D, undo_guard (ADR-021)
 
                 def on_selected_bboxes_error(error_tuple: tuple) -> None:
-                    try:
-                        self.main.undo_group.activeStack().endMacro()
-                    except Exception:
-                        pass
+                    pass  # fork: plus de macro ouverte au clic à refermer ici (option D, undo_guard)
                     self.main.default_error_handler(error_tuple)
 
+                _guarded_result, _guarded_finished = guard_segmentation(self.main, on_selected_bboxes_ready, self.main.on_manual_finished, page_bound=False)  # fork: verrou + macro (option D, undo_guard)
                 self.main.run_threaded(
                     compute_selected_bboxes,
-                    on_selected_bboxes_ready,
+                    _guarded_result,  # fork: résultat gardé (option D, undo_guard)
                     on_selected_bboxes_error,
-                    self.main.on_manual_finished,
+                    _guarded_finished,  # fork: fin gardée, lève le verrou (option D, undo_guard)
                 )
                 return
 
             if self.main.blk_list:
-                self.main.undo_group.activeStack().beginMacro("draw_segmentation_boxes")
+                # fork: plus de macro au clic ; verrou + macro posés par l'appelant page seule (option D, undo_guard, ADR-021)
 
                 if self.main.webtoon_mode:
                     self.main.run_threaded(
@@ -721,19 +720,21 @@ class ManualWorkflowController:
                             results.append((blk, stroke))
                         return results
 
+                    _guarded_result, _guarded_finished = guard_segmentation(self.main, self._on_segmentation_bboxes_ready, self.main.on_manual_finished)  # fork: verrou + macro liée à la page (option D, undo_guard)
                     self.main.run_threaded(
                         compute_all_strokes,
-                        self._on_segmentation_bboxes_ready,
+                        _guarded_result,  # fork: résultat gardé (option D, undo_guard)
                         self.main.default_error_handler,
-                        self.main.on_manual_finished,
+                        _guarded_finished,  # fork: fin gardée, lève le verrou (option D, undo_guard)
                     )
 
             else:
+                _guarded_result, _guarded_finished = guard_segmentation(self.main, self.blk_detect_segment, self.main.on_manual_finished)  # fork: verrou + macro liée à la page (option D, undo_guard)
                 self.main.run_threaded(
                     self.main.pipeline.detect_blocks,
-                    self.blk_detect_segment,
+                    _guarded_result,  # fork: résultat gardé (option D, undo_guard)
                     self.main.default_error_handler,
-                    self.main.on_manual_finished,
+                    _guarded_finished,  # fork: fin gardée, lève le verrou (option D, undo_guard)
                 )
 
     def _on_segmentation_bboxes_ready(
@@ -749,4 +750,4 @@ class ManualWorkflowController:
             for blk, stroke in results:
                 if stroke is not None:
                     self.main.image_viewer.draw_segmentation_lines(blk.xyxy, stroke=stroke)
-        self.main.undo_group.activeStack().endMacro()
+        # fork: macro fermée par l'appelant (page_bound/in_macro) — option D, undo_guard (ADR-021)

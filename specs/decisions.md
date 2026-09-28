@@ -1073,3 +1073,121 @@ signaux sur les items trop tôt, B2 macro évaluée à l'index 0, M1-M9) → dé
 architect v2 (option C améliorée) → critic pass 2 (« Acceptable to proceed », MAJ1 accepté comme
 limite connue) → décision de Philippe (accepter, corriger MAJ1 dans une sous-étape ultérieure) →
 implementer → tester (OK, 7 tests ajoutés) → validation manuelle de Philippe le 2026-09-28.
+
+## ADR-021 — Macros d'annulation : ouvertes au résultat, jamais au clic (`undo_guard`)
+
+Date : 2026-09-28
+Statut : Adoptée (jalon 3 de la spec 04, sous-étape 3a-bis, validée à la main par Philippe le
+2026-09-28)
+
+**Contexte** : défaut amont identifié pendant la conception de 3a (ADR-020), corrigé séparément.
+Nettoyage page seule (`beginMacro("inpaint")` au clic, `manual_workflow.py:~605`, fermé seulement
+au succès `pipeline/inpainting.py:~815`) et segmentation (page seule `:~705` → `:~752` succès
+seulement ; multi-pages `:~644` → `:~687`/`:~691`) ouvraient une macro sur `activeStack()` au clic
+et la fermaient sur `activeStack()` en fin d'opération. Erreur, Annuler pendant le calcul, file
+vidée, exception dans le rappel, ou changement de page entre le clic et la fin → macro orpheline
+(`canUndo()` faux, Annuler refusé sur la page) ou fermeture sur la mauvaise pile
+(« endMacro(): no matching beginMacro() »). Découvert en plus pendant la conception : **changer de
+page pendant un nettoyage ou une segmentation page seule** faisait poser sur B le résultat calculé
+sur A (patchs de A sur la pile de B, avec le chemin de fichier de B, `image.py:1324-1326`, traits
+de B effacés) — défaut amont non listé jusqu'ici.
+
+**Options considérées** :
+- **A (rejetée)** : correction ponctuelle à chaque site d'ouverture/fermeture de macro. Ne couvre
+  pas le cas « file vidée avant que le rappel de succès ne s'exécute » (étape fantôme, macro jamais
+  fermée).
+- **B (rejetée)** : utilitaire qui ouvre la macro au clic et garantit sa fermeture (context manager
+  ou décorateur). Même lacune que A sur la file vidée — l'ouverture au clic reste le problème de
+  fond, pas seulement l'appariement ouverture/fermeture.
+- **C (rejetée)** : filet global qui ferme toute macro ouverte dès que plus rien ne tourne. Jugée
+  dangereuse : la double planification de `_process_next_operation` après une erreur (voir
+  `task_runner.py:71-79`, limite 5 ci-dessous) aurait pu faire fermer prématurément la macro
+  `render_text` d'une opération réellement en cours.
+- **D (retenue)** : ne jamais ouvrir de macro au clic. La macro est ouverte **dans le rappel de
+  succès**, de façon synchrone, et fermée dans le même appel (`try/finally`) — plus aucune macro
+  ouverte d'un tour de boucle d'événements à l'autre pour le nettoyage et la segmentation. Critic :
+  « Acceptable to proceed ».
+
+**Décision** — `modules/undo_guard/` (nouveau paquet) :
+- `macro.py` (pur, aucun import PySide6) : `in_macro(main, name, fn)` — pile active **au moment de
+  l'appel**, ouvre/exécute/ferme dans le même appel synchrone ; `page_bound(main, name, fn,
+  notify)` — capture la page affichée et sa pile **au clic**, n'exécute le rappel que si la page
+  affichée et sa pile n'ont pas changé au moment du succès, sinon abandonne et prévient
+  l'utilisateur (jamais de push silencieux sur la mauvaise page).
+- `ui.py` (seul fichier du paquet à importer PySide6) : verrou d'annulation, `guard_cleaning`,
+  `guard_segmentation`, `install_undo_guard(main)`.
+
+**Décisions de Philippe** :
+1. Changement de page pendant le calcul de nettoyage/segmentation → **résultat abandonné +
+   message** (nettoyage : « Nettoyage de la page N (nom) abandonné : la page affichée a changé
+   pendant le calcul. Relancez Nettoyer sur cette page. » ; segmentation : message qui précise en
+   plus que les cadres effacés au lancement se rétablissent par Annuler, l'amont les effaçant déjà
+   au clic).
+2. **Annulation bloquée pendant le calcul** de nettoyage/segmentation : `main._undo_locked_by` posé
+   au clic, levé dans le rappel de fin (appelé dans tous les cas par `GenericWorker`) ; filet par
+   chien de garde à 250 ms si la file a été vidée sans rappel (`is_processing_queue` retombé à
+   faux). Raccourci ⌘Z/⌘Y refusé (1 ligne `# fork:`, `shortcuts.py`). Boutons Annuler/Rétablir de la
+   barre de titre : clics **avalés par un filtre d'événements** + infobulle « Indisponible pendant
+   le calcul » — **jamais `setEnabled`**, voir plantage ci-dessous.
+
+**Plantage rencontré et corrigé pendant l'implémentation** : une première version verrouillait les
+boutons Annuler/Rétablir par `setEnabled(False)` sur les `MToolButton` de dayu. C'est exactement le
+chemin de plantage natif de l'ADR-018 (`MToolButton.changeEvent` crée un `QGraphicsOpacityEffect`
+en réponse à un autre événement en cours de dépêche, bug PySide6/Shiboken6 6.11.2). Mesuré : 4/40
+plantages natifs dans ce chemin avant correction, 0/40 après passage au filtre d'événements
+(2/40 résiduels, mais à la construction de fenêtres de test, sans rapport avec le verrou).
+
+**Amont touché** : `manual_workflow.py` 19 lignes `# fork:` + 1 import (fichier édité en octets,
+fins de ligne mixtes préservées : 543 CRLF / 1 CR / 210 LF, piège déjà consigné à l'ADR-016) ;
+`pipeline/inpainting.py:815` (`endMacro` retiré, fermeture déplacée dans le rappel) ; `shortcuts.py`
+1 ligne ; `controller.py` 2 lignes (`install_undo_guard`) ; `tests/conftest.py` 1 ligne. **Total :
+24 lignes.** Branche webtoon de la segmentation non touchée (inatteignable depuis 2b, webtoon
+abandonné §7 de la spec 04). Rendu (`text.py`) inchangé : il fermait déjà sa macro sur succès
+**et** erreur, sur la pile mémorisée au clic — pas concerné par le défaut. `modules/reset/state.py` :
+texte de confirmation de macro orpheline rendu générique (partagé avec le mécanisme du reset,
+ADR-020).
+
+**Tests** :
+- `tests/test_undo_guard.py` (25, hors GUI) : `in_macro`, `page_bound` y compris changement de page
+  A→B→A et cas limites, messages, garde statique sur les motifs amont **prouvée par mutation**
+  (le test échoue si on réintroduit un `beginMacro`/`endMacro` couplé au clic), pureté du module.
+- `tests/test_undo_guard_ui.py` (17, `--gui`) : succès/erreur/annulation/changement de page avec
+  `threading.Event`/file vidée, verrou refusé par raccourci et par vrai clic puis accepté après
+  levée, deux opérations enchaînées sans verrou orphelin, relâchement par nom périmé sans effet,
+  segmentation page seule et multi-pages, `blk_detect_segment`, plus de confirmation « historique
+  bloqué » (mécanisme du reset) après un nettoyage en échec, journal Qt capturé via `qtlog` sans
+  « no matching beginMacro » ni « cannot undo in the middle of a macro ».
+- Suites : 344 passed hors GUI ; `--gui` (`.venv/bin/python -m pytest`, ADR-018) 529 passed,
+  3 skipped, 1 failed (`test_app.py`, échec amont connu).
+
+**Limites connues, assumées** :
+1. Le worker lit la scène **à son démarrage**, pas à la fin. S'il attend en file (ex. derrière un
+   autosave) et que l'utilisateur fait A → B → A avant que le worker démarre, le résultat calculé
+   sur B peut être posé sur A (annulable, mais pas empêché « par construction » — seul le
+   changement de page **après** démarrage du worker est couvert).
+2. Macro vide poussée au succès sans aucune écriture (parité avec le comportement amont d'origine,
+   non corrigé).
+3. Détecter / Reconnaître / Traduire page seule gardent le défaut « résultat posé sur la page
+   affichée » (ADR-014, défauts amont n°1 et n°2) — seuls nettoyage et segmentation sont couverts
+   par ce lot.
+4. Nettoyage multi-pages non couvert par le verrou : ses macros par pile étaient déjà sûres
+   (une pile par page, jamais partagée entre deux pages en cours de traitement).
+5. Double planification de `_process_next_operation` après une erreur (`task_runner.py:71-79`,
+   défaut préexistant à l'ADR-019) : `is_processing_queue` peut repasser à faux pendant qu'une
+   opération tourne encore — au pire le filet à 250 ms lève le verrou un peu tôt. Consigné, non
+   corrigé dans ce lot.
+6. `load_segmentation_points` pousse toujours un `ClearRectsCommand` au clic (comportement amont
+   inchangé).
+
+**Pièges de test rencontrés, consignés dans `CLAUDE.md`** : une exception qui atteint
+`default_error_handler` ouvre une vraie `QMessageBox.exec()` qui bloque indéfiniment la suite en
+offscreen — neutraliser `Messages.show_error_with_copy` dans les fixtures concernées ; ne jamais
+laisser tourner le vrai modèle (LaMa/ONNX) dans un test GUI, stubber `pipeline.inpaint` ;
+`app/ui/dayu_widgets/menu.py:300` lève parfois `AttributeError ... pixelMetric` en offscreen
+(bruit sans rapport, à ignorer) ; ne jamais lancer deux suites `--gui` en parallèle (partagent
+l'état offscreen Qt).
+
+**Chaîne de conception** : architect (option D) → critic (« Acceptable to proceed », M1-M4 traités
+en consignes) → décisions de Philippe (verrou, abandon + message, jamais `setEnabled`) →
+implementer → tester (OK, puis plantage natif dans `setEnabled` trouvé et corrigé — clics avalés,
+mesure 4/40 → 0/40) → validation manuelle de Philippe le 2026-09-28.
