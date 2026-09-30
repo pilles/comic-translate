@@ -1051,7 +1051,9 @@ Suites : 319 passed hors GUI ; `--gui` 487 passed, 3 skipped, 1 failed (`test_ap
    `modules/history/commands.py:61-63/:89-90`, `app/ui/commands/textformat.py:24`). Défaut
    préexistant après toute navigation (pas propre au reset), figé par
    `test_maj1_undo_past_an_undone_reset_targets_recreated_item`. Corriger ce défaut rendra aussi
-   robuste le cas « changer de page puis revenir ».
+   robuste le cas « changer de page puis revenir ». *(Amendement 2026-09-30 : promesse trop
+   large — réglé pour le **texte** par la 3a-ter, ADR-022 ; les **boîtes tracées à la main** restent
+   concernées jusqu'à la 3a-quater, critic M4.)*
 2. Invalidation de cache et effacement de l'avertissement « page sautée » : non annulés par
    Cmd+Z (seul l'état de la page l'est).
 3. Fidélité « navigation » plutôt que « bit à bit » : tracés Z 0,8 → 0 après reset, ordre des
@@ -1073,6 +1075,9 @@ signaux sur les items trop tôt, B2 macro évaluée à l'index 0, M1-M9) → dé
 architect v2 (option C améliorée) → critic pass 2 (« Acceptable to proceed », MAJ1 accepté comme
 limite connue) → décision de Philippe (accepter, corriger MAJ1 dans une sous-étape ultérieure) →
 implementer → tester (OK, 7 tests ajoutés) → validation manuelle de Philippe le 2026-09-28.
+
+**Amendement 2026-09-30** : limite MAJ1 corrigée par ADR-022 (3a-ter). Le test figé est inversé :
+`test_maj1_undo_past_an_undone_reset_restores_text_on_recreated_item`.
 
 ## ADR-021 — Macros d'annulation : ouvertes au résultat, jamais au clic (`undo_guard`)
 
@@ -1191,3 +1196,96 @@ l'état offscreen Qt).
 en consignes) → décisions de Philippe (verrou, abandon + message, jamais `setEnabled`) →
 implementer → tester (OK, puis plantage natif dans `setEnabled` trouvé et corrigé — clics avalés,
 mesure 4/40 → 0/40) → validation manuelle de Philippe le 2026-09-28.
+
+## ADR-022 — Annulations de texte robustes aux items recréés (`text_undo`)
+
+Date : 2026-09-30
+Statut : Adoptée (spec 04 jalon 3, sous-étape 3a-ter, validée à la main par Philippe le 2026-09-30)
+
+**Contexte** : MAJ1 de l'ADR-020. `TextEditCommand` et `TextFormatCommand` (amont) et
+`RestoreVersionCommand` (fork) mémorisaient l'objet `TextBlockItem`. Après rechargement de la scène
+(changement de page puis retour, reset puis annuler, rendu annulé puis rétabli), l'item était
+détruit ou détaché → `RuntimeError: already deleted`, ou annulation sans effet visible alors que le
+bloc changeait. Défaut préexistant après toute navigation, pas propre au reset.
+
+**Options considérées** : A à E. **Retenue : A** — résoudre l'item cible à chaque application
+(appariement sur la scène vivante) dans un paquet neuf, sans réécrire les commandes amont au-delà
+d'une ou deux lignes. Critic : « Acceptable to proceed », avec conditions M1-M5.
+Options rejetées :
+- **B — sous-classes du fork poussées à la place** des commandes amont (`RobustTextEditCommand`,
+  `RobustTextFormatCommand`) : 12 sites de construction à modifier (1 pour TE, 11 pour TF dans
+  `text.py`), ou un alias d'import ; dépend de noms privés amont (`_apply`, `_get_item`) dont un
+  renommage désactiverait la protection en silence ; tout nouveau site amont non protégé.
+- **C — registre qui remappe ancien item → nouvel item à chaque rechargement** : 5 à 7 sites amont
+  (capture avant `clear_scene`, appariement après chaque recréation), parcours de toutes les piles et
+  macros, réécriture d'attributs privés des commandes ; l'appariement géométrique reste nécessaire et
+  les retraits non tracés (Segmenter) ne sont pas couverts.
+- **D — commandes par clé seule** (façon `ReplaceBlocksCommand`) : A sans le chemin nominal, plus de
+  lignes amont et un comportement modifié même quand tout va bien.
+- **E — garder les items vivants à la navigation** : option B de l'ADR-020, déjà rejetée par le
+  critic (liste de blocs neuve, ordre d'empilement, rectangles hors scène).
+
+**Décision** — `modules/text_undo/` (nouveau paquet) :
+- `match.py` (pur, sans PySide6 ni shiboken6) : sélection du candidat, tolérances amont (±5 px de
+  position, ±1° de rotation), vérification du texte attendu, refus en cas d'égalité, liste blanche
+  `FORMAT_KEYS`, `is_valid` injecté.
+- `resolve.py` (importe `shiboken6`) : `apply_text_edit`, `resolve_format_target`.
+- **Chemin nominal** (item valide et dans la scène) identique à l'amont, sauf qu'un bloc mort est
+  remplacé par le bloc apparié à l'item, ou `None` (critic M3 : jamais d'écriture ni de
+  `curr_tblock` sur un bloc mort, ex. après un nouveau Détecter).
+- **Sinon** : candidats parmi `viewer.text_items` attachés → filtres position/rotation → **texte
+  attendu vérifié même avec un seul candidat** (critic M2 : jamais écraser un texte changé entre-
+  temps, ex. « Tout remplacer » depuis une autre page) → contrôle croisé item↔bloc → plus proche ;
+  égalité → refus. Ancre `_fork_anchor` (page, position, rotation) rafraîchie à chaque application
+  réussie.
+- `RestoreVersionCommand` résout à chaque application ; `_applied` inchangé si rien n'est muté.
+- `TextFormatCommand` : cible parmi `scene.items()` ; `old_dict`/`new_dict` réduits une fois à
+  `FORMAT_KEYS` à la substitution (jamais `layout`, `_ct_text_changed_slot`, `selected`,
+  `editing_mode`, `vertical`). Le repli amont `find_matching_txt_item` est remplacé (cas couverts
+  par la nouvelle résolution).
+
+**Décisions de Philippe** :
+- **D1** — l'édition de texte en attente (minuterie 400 ms) est validée **au changement de page**
+  (`image_ctrl.display_image`, avant `save_current_image_state`).
+- **D2** — si l'item n'existe plus : texte écrit sur le bloc vivant seul (panneau mis à jour), rien
+  pour le format, jamais d'exception ni de recréation d'item, **pas de message** (journal seulement).
+- **D3** — commandes de boîtes à liste orpheline traitées à part : **3a-quater** (à venir).
+
+**Correction du critic M1 (bis)** : l'édition en attente est aussi validée **juste avant Annuler/
+Rétablir** — raccourci (1 ligne `shortcuts.py`, après la ligne du verrou d'`undo_guard`, qui garde la
+priorité) et boutons de la barre de titre (signal `pressed`, émis avant `clicked`, branché dans
+`modules/undo_guard/ui.py` ; sous verrou, l'appui est avalé par le filtre et rien n'est validé).
+Effet : taper puis ⌘Z aussitôt valide la frappe puis l'annule ; ⌘Y la rétablit — aucune perte.
+
+**Exception à l'ADR-012** : le chemin « bloc seul » de `TextEditCommand` écrit `blk.translation` sans
+`set_text`, comme le chemin nominal amont ; `flush_pending` rattrape en `manual`. Le chemin bloc seul
+de `RestoreVersionCommand` passe, lui, par `set_text`. Mesuré : 15 cycles annuler/rétablir +
+navigation n'ajoutent qu'une entrée `manual` à l'historique de la bulle.
+
+**Effet de bord de D1 (critic m10)** : une édition en attente pendant une macro de rendu ouverte
+entre dans cette macro (annuler le rendu l'annule aussi). `display_image` n'est jamais appelé depuis
+un `redo`/`undo`.
+
+**Amont touché** : `app/ui/commands/text_edit.py` 2 lignes `# fork:`, `textformat.py` 2 (la ligne
+de `_get_item` remplace 3 lignes d'origine), `app/controllers/image.py` 1 (D1),
+`app/controllers/shortcuts.py` 1, `tests/conftest.py` 1. Aucune dans `text.py`.
+
+**Tests** : `tests/test_text_undo.py` (55, hors GUI), `tests/test_text_undo_ui.py` (~44, `--gui`,
+dont 20 ajoutés par le tester sur les vrais chemins : navigation par `display_image`, raccourcis
+réels, minuterie réelle de 400 ms, vrais clics et Espace sur le bouton Annuler, textes difficiles,
+historique), `tests/test_reset_ui.py` (MAJ1 inversé). Sensibilité prouvée par mutation. Suites :
+399 passed hors GUI ; `--gui` 627 passed, 4 skipped, 1 failed (`test_app.py`, amont connu). Une
+exécution complète s'est arrêtée une fois sur un plantage natif non attribué (famille ADR-018
+probable), relance verte.
+
+**Limites connues, assumées** :
+1. `TextFormatCommand` n'a pas de contrôle de page (la commande n'a pas `main`).
+2. Commandes de boîtes (`AddRectangleCommand`, `DeleteBoxesCommand`, à vérifier
+   `BoxesChangeCommand`/`ResizeBlocksCommand`) : liste `main.blk_list` de leur construction remplacée
+   à la navigation → hors périmètre, **3a-quater** (D3). Les boîtes tracées à la main restent donc
+   concernées par « changer de page puis revenir » (critic M4).
+3. Le chemin « bloc seul » contourne `set_text` (exception ADR-012 ci-dessus).
+
+**Chaîne de conception** : architect → session interrompue → critic relancé (« Acceptable to
+proceed », conditions M1-M5) → décisions de Philippe D1/D2/D3 → implementer → tester (OK) →
+validation manuelle de Philippe le 2026-09-30.

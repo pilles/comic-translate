@@ -115,6 +115,15 @@ Toute ligne modifiée dans un fichier d'origine (pas les fichiers nouveaux) port
   `main._undo_locked_by` posé au clic/levé au rappel de fin + filet 250 ms, `guard_cleaning`,
   `guard_segmentation`, `install_undo_guard`. Importé uniquement depuis `controller.py`. Détail :
   ADR-021.
+- `modules/text_undo/` — annulations de texte robustes aux items recréés (spec 04, 3a-ter) :
+  `match.py` pur (ni PySide6 ni shiboken6 ; choix du candidat, tolérances amont ±5 px/±1°, **texte
+  attendu vérifié même avec un seul candidat**, refus en cas d'égalité, liste blanche `FORMAT_KEYS`,
+  `is_valid` injecté) ; `resolve.py` (`apply_text_edit`, `resolve_format_target`, importe
+  `shiboken6`). Chemin nominal (item valide dans la scène) **identique à l'amont** ; bloc mort jamais
+  écrit. Item introuvable : bloc vivant seul, sinon rien, sans exception ni message. Ancre
+  `_fork_anchor` rafraîchie à chaque application. Édition en attente validée au changement de page
+  (`display_image`) et avant Annuler/Rétablir (raccourci + signal `pressed` des boutons). Ne jamais
+  mémoriser un `TextBlockItem` dans une commande sans passer par ce paquet. Détail : ADR-022.
 
 ## Traduction locale (Ollama)
 
@@ -227,9 +236,18 @@ suites `--gui` en parallèle.
 - Double planification de `_process_next_operation` après une erreur (`task_runner.py:71-79`) :
   `is_processing_queue` peut repasser à faux pendant qu'une opération tourne encore — au pire le
   filet à 250 ms d'`undo_guard` lève le verrou d'annulation un peu tôt (ADR-021, limite 5).
-- Annulations de texte (`TextEditCommand`, `RestoreVersionCommand`, `TextFormatCommand`) qui visent
-  un item détruit après navigation ou reset de page → `RuntimeError` à l'annulation (MAJ1) —
-  décidée par Philippe, correction à venir (3a-ter, ADR-020).
+- ~~Annulations de texte (`TextEditCommand`, `RestoreVersionCommand`, `TextFormatCommand`) qui
+  visent un item détruit après navigation ou reset de page → `RuntimeError` à l'annulation
+  (MAJ1)~~ : **corrigé dans le fork** (`modules/text_undo/`, 3a-ter, ADR-022). Limite : `TextFormatCommand`
+  sans contrôle de page (pas de `main`).
+- Commandes de boîtes (`AddRectangleCommand`, `DeleteBoxesCommand`, à vérifier : `BoxesChangeCommand`,
+  `ResizeBlocksCommand`) qui gardent la liste `main.blk_list` de leur construction, remplacée à la
+  navigation → bloc fantôme ou bloc recréé dans une liste orpheline après changement de page puis
+  annulation. Décidée par Philippe, correction à venir (3a-quater, ADR-022 D3).
+- Rendu : `pyside_word_wrap` (`modules/rendering/render.py`) coupe le texte en lignes, puis
+  `update_text_block_from_item` (`app/controllers/text.py`) réécrit ces coupures dans
+  `blk.translation` ; la coupe se fait probablement sur la largeur du texte d'origine (`blk.xyxy`),
+  pas de la bulle (à confirmer). Ce n'est pas le modèle (ADR-017 fonctionne). Sous-étape 3d à venir.
 
 ## Mémoire projet
 

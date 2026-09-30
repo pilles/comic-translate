@@ -281,6 +281,41 @@ projet. Rien de neuf, rien de cassé.
 > robustes aux items recréés (MAJ1 de l'ADR-020) — `TextEditCommand`, `RestoreVersionCommand`,
 > `TextFormatCommand` visent un item détruit après navigation ou reset et lèvent `RuntimeError` à
 > l'annulation. Corriger ce défaut réglera aussi le cas général « changer de page puis revenir ».
+> *(Précision 2026-09-30 : réglé pour le texte seulement ; les boîtes tracées à la main restent
+> concernées jusqu'à la 3a-quater.)*
+>
+> **3a-ter livrée le 2026-09-30, validée à la main par Philippe.** Les trois commandes résolvent
+> désormais leur item cible à chaque application au lieu de mémoriser l'objet : paquet
+> `modules/text_undo/` (`match.py` pur, `resolve.py`), chemin nominal identique à l'amont, texte
+> attendu toujours vérifié (jamais d'écrasement d'un texte changé entre-temps), item introuvable →
+> bloc vivant seul ou rien, sans exception ni message. Décisions de Philippe : édition en attente
+> validée au changement de page (D1) et juste avant Annuler/Rétablir (critic M1 bis) ; pas de message
+> si l'item a disparu (D2) ; commandes de boîtes à part (D3). Amont : 7 lignes `# fork:` dans 5
+> fichiers. Tests : `tests/test_text_undo.py` (55, hors GUI), `tests/test_text_undo_ui.py` (~44,
+> `--gui`). Suites : 399 passed hors GUI ; `--gui` 627 passed, 4 skipped, 1 failed (`test_app.py`,
+> amont connu). Détail, limites et exception à l'ADR-012 : ADR-022 (`specs/decisions.md`).
+>
+> **3a-quater (décidée, à venir)** : commandes de boîtes (`AddRectangleCommand`,
+> `DeleteBoxesCommand` ; vérifier `BoxesChangeCommand` et `ResizeBlocksCommand`) qui gardent la
+> liste `main.blk_list` de leur construction. Cette liste est remplacée à la navigation → bloc
+> fantôme, ou bloc recréé dans une liste orpheline, après changement de page puis annulation.
+>
+> **3d — sauts de ligne du rendu (nouvelle sous-étape, à planifier, après le jalon 3 courant ou
+> là où c'est cohérent).** Signalé par Philippe le 2026-09-30 : « j'ai toujours le problème des sauts
+> de ligne de la traduction, je suis obligé d'éditer le texte à la main si j'ai des retours à la
+> ligne très fréquents ». **Diagnostic (projet `project_20260920_181633.ctpr`, page 013)** : 5
+> traductions sur 10 contiennent un `\n`. Historique de la bulle « IL POUVAIT TRANSFORMER… » :
+> 18:38:13 origine `cache` (traduction Ollama), « Il pouvait transformer une pièce avec le simple
+> geste… » **sur une ligne** ; 18:39:43 origine `manual`, « IL POUVAIT TRANSFORMER UNE PIÈCE AVEC
+> LE\nSIMPLE GESTE… » (majuscules + saut de ligne, au moment du rendu). **Ce n'est pas la
+> traduction (le hotfix ADR-017 fonctionne), c'est le rendu** : `pyside_word_wrap`
+> (`modules/rendering/render.py:~259`) coupe le texte selon la largeur disponible, l'item rendu
+> contient ces sauts, et `update_text_block_from_item` (`app/controllers/text.py:~279-284`) réécrit
+> le texte de l'item dans `blk.translation` ; la casse vient de `format_translations` au rendu
+> (`text.py:~966`). Coupures fréquentes : **hypothèse à confirmer** — la largeur de coupe serait celle
+> de la zone du texte anglais (`blk.xyxy`) et non de la bulle, le français plus long passant alors
+> sur beaucoup de lignes courtes. Objectifs : (a) ne plus réécrire les coupures du rendu dans la
+> traduction de la bulle ; (b) couper selon la largeur de la bulle (à confirmer en conception).
 
 - Barre d'étapes alimentée par le jalon 1, bouton « Continuer ».
 - Messages de résultat après chaque étape, avec des nombres.

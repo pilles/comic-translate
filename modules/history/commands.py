@@ -5,16 +5,20 @@ jamais depuis `modules/history/__init__.py` (qui reste pur, voir ADR-012)."""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QUndoCommand
 
 from modules.history import versions
+from modules.text_undo import resolve
 from modules.utils.common_utils import is_close
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
     from modules.utils.textblock import TextBlock
+
+logger = logging.getLogger(__name__)
 
 # Tolérances de l'appariement item<->bloc, reprises telles quelles de
 # `app/controllers/text.py:384-389` (`_find_text_block_for_item`).
@@ -43,6 +47,13 @@ class RestoreVersionCommand(QUndoCommand):
     les widgets source/traduction sous ``blockSignals``.
     undo : réécrit l'ancienne valeur sans journaliser, retire l'entrée
     ``restore`` si elle est bien en tête (jamais le pré-état).
+
+    Sous-étape 3a-ter (ADR-022) : la cible (bloc et item) est **résolue à
+    chaque application** (`modules.text_undo.resolve.resolve_text_target`) —
+    l'item mémorisé peut avoir été détruit par un changement de page ou un
+    reset, le bloc remplacé par une copie (nouveau Détecter). Rien de résolu
+    (ou texte attendu différent) : aucune mutation, `_applied` inchangé (pas
+    d'entrée ``restore`` orpheline), jamais d'exception ni de message.
     """
 
     def __init__(self, main: "ComicTranslate", blk: "TextBlock", entry: "versions.HistoryEntry"):
@@ -61,9 +72,16 @@ class RestoreVersionCommand(QUndoCommand):
         self.item = (
             _find_item_for_block(main, blk) if self.field == versions.FIELD_TRANSLATION else None
         )
+        # Sans item à la construction (bloc jamais rendu, ou champ source), le comportement
+        # d'origine est conservé : bloc vivant écrit sans vérification de son texte.
+        self._had_item = self.item is not None
+        self._fork_anchor = resolve.anchor_from_block(resolve.current_page(main), blk)
 
     def redo(self) -> None:
-        blk, field, value = self.blk, self.field, self.new_value
+        target = self._resolve(expected=self.old_value)
+        if target is None:
+            return
+        blk, field, value = target.blk, self.field, self.new_value
         if not self._applied:
             versions.set_text(blk, field, value, versions.ORIGIN_RESTORE)
             self._applied = True
@@ -71,38 +89,55 @@ class RestoreVersionCommand(QUndoCommand):
             # Deuxième redo (après un undo) : ne pas rejournaliser, l'entrée
             # `restore` a déjà été créée une fois (et n'a pas été retirée).
             setattr(blk, field, value)
-        self._apply_to_widgets(value)
+        self._apply_to_widgets(target, value)
         self.main.mark_project_dirty()
 
     def undo(self) -> None:
-        blk, field, value = self.blk, self.field, self.old_value
+        target = self._resolve(expected=self.new_value)
+        if target is None:
+            return
+        blk, field, value = target.blk, self.field, self.old_value
         if self._applied:
             versions.pop_head_if_origin(blk, field, versions.ORIGIN_RESTORE)
             self._applied = False
         setattr(blk, field, value)
-        self._apply_to_widgets(value)
+        self._apply_to_widgets(target, value)
         self.main.mark_project_dirty()
 
-    def _apply_to_widgets(self, value: str) -> None:
-        main, blk, field = self.main, self.blk, self.field
+    def _resolve(self, expected: str) -> "resolve.TextTarget | None":
+        """Cible de l'application, ou `None` (aucune mutation). Un bloc est indispensable :
+        sans lui, il n'y a rien à journaliser ni à restaurer."""
+        checked = self.field == versions.FIELD_TRANSLATION and self._had_item
+        target = resolve.resolve_text_target(
+            self.main,
+            item=self.item,
+            blk=self.blk,
+            anchor=self._fork_anchor,
+            expected=expected,
+            field=self.field,
+            want_item=checked,
+            verify_live_block=checked,
+        )
+        if target.blk is None:
+            logger.info(
+                "modules.history.commands: RestoreVersionCommand sans effet (%s) : "
+                "bloc non résolu.",
+                target.reason,
+            )
+            return None
+        return target
 
-        if field == versions.FIELD_TRANSLATION and self.item is not None:
-            main.text_ctrl.apply_text_from_command(self.item, value, html=None, blk=blk)
+    def _apply_to_widgets(self, target: "resolve.TextTarget", value: str) -> None:
+        main, blk, field = self.main, target.blk, self.field
+
+        if field == versions.FIELD_TRANSLATION and target.item is not None:
+            main.text_ctrl.apply_text_from_command(target.item, value, html=None, blk=blk)
+            if target.item is not self.item:
+                self.item = target.item  # les applications suivantes redeviennent nominales
+            resolve.refresh_anchor(self, main, target.item, blk)
             return
 
-        if main.curr_tblock is not blk:
-            return
-
-        # M5 : écrire dans s_text_edit sans bloquer les signaux réécrirait
-        # aussi translation (`update_text_block`) ; on bloque les deux
-        # champs par prudence, quel que soit celui qu'on modifie.
-        main.s_text_edit.blockSignals(True)
-        main.t_text_edit.blockSignals(True)
-        try:
-            if field == versions.FIELD_TEXT:
-                main.s_text_edit.setPlainText(value)
-            else:
-                main.t_text_edit.setPlainText(value)
-        finally:
-            main.s_text_edit.blockSignals(False)
-            main.t_text_edit.blockSignals(False)
+        resolve.refresh_anchor(self, main, None, blk)
+        # M5 : écrire dans s_text_edit sans bloquer les signaux réécrirait aussi translation
+        # (`update_text_block`) ; `update_panel` bloque les deux champs par prudence.
+        resolve.update_panel(main, blk, field, value)

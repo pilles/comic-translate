@@ -32,7 +32,10 @@ Décisions de Philippe (2026-09-28) :
   de garde léger qui lève le verrou si `task_runner_ctrl.is_processing_queue` est retombé à faux
   pendant que le verrou est encore posé — zéro ligne dans `task_runner.py` (`is_processing_queue`
   reste vrai tant qu'une opération tourne ou attend en file ; il ne retombe à faux hors fin
-  normale que par `cancel_current_task`, précisément le cas à couvrir)."""
+  normale que par `cancel_current_task`, précisément le cas à couvrir).
+- Sous-étape 3a-ter (M1 bis, ADR-022) : le signal `pressed` des deux boutons (émis à l'appui,
+  avant `clicked`) valide l'édition de texte en attente (`_commit_before_undo_redo`) ; le verrou
+  garde la priorité (le filtre avale l'appui, et le rappel recontrôle `_undo_locked_by`)."""
 
 from __future__ import annotations
 
@@ -146,6 +149,14 @@ class _UndoRedoClickBlocker(QtCore.QObject):
         return False
 
 
+def _commit_before_undo_redo(main: "ComicTranslate") -> None:
+    """Valide l'édition de texte en attente avant Annuler/Rétablir (M1 bis, 3a-ter, ADR-022).
+    Le verrou d'annulation garde la priorité : rien n'est validé tant qu'il est posé."""
+    if getattr(main, "_undo_locked_by", None) is not None:
+        return
+    main.text_ctrl._commit_pending_text_command()
+
+
 def acquire_lock(main: "ComicTranslate", name: str) -> None:
     main._undo_locked_by = name
     for button in _undo_redo_buttons(main):
@@ -188,6 +199,17 @@ def install_undo_guard(main: "ComicTranslate") -> None:
             button.installEventFilter(blocker)
         except Exception:
             logger.exception("modules.undo_guard.ui: installation du filtre de clic en échec.")
+
+    for button in _undo_redo_buttons(main):
+        # M1 bis (3a-ter, ADR-022) : `pressed` est émis à l'appui, avant `clicked` (relâchement) qui
+        # déclenche `undo_group.undo/redo` — l'édition de texte en attente (minuterie 400 ms) est
+        # validée sur la pile avant d'être annulée. Aucun `setEnabled` (ADR-018). Le filtre
+        # `_UndoRedoClickBlocker` avale l'appui tant que le verrou est posé : `pressed` n'est alors
+        # jamais émis ; `_commit_before_undo_redo` recontrôle le verrou pour un `click()` programmé.
+        try:
+            button.pressed.connect(lambda m=main: _commit_before_undo_redo(m))
+        except Exception:
+            logger.exception("modules.undo_guard.ui: branchement de `pressed` en échec.")
 
     watchdog = QtCore.QTimer(main)
     watchdog.setInterval(_WATCHDOG_INTERVAL_MS)

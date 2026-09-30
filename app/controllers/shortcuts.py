@@ -59,6 +59,7 @@ class ShortcutController:
             "toggle_brush_strokes": self._toggle_brush_strokes,
         }
         if shortcut_id in ("undo", "redo") and getattr(self.main, "_undo_locked_by", None) is not None: return  # fork: verrou nettoyage/segmentation (option D, modules.undo_guard, ADR-021)
+        if shortcut_id in ("undo", "redo"): self.main.text_ctrl._commit_pending_text_command()  # fork: valider l'édition de texte en attente avant Annuler/Rétablir (3a-ter M1 bis, ADR-022) ; après le verrou d'undo_guard
         handler = handlers.get(shortcut_id)
         if handler is not None:
             handler()

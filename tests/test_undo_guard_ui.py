@@ -5,7 +5,7 @@ nettoyage et la segmentation (`modules/undo_guard/{macro,ui}.py`, sites gardés 
 Précédents : `tests/test_reset_ui.py` (fixture `main` sans effet de bord, `main.show()` requis
 pour les chiens de garde qui sortent tôt si le widget est caché, `_add_open_page`/
 `_add_second_page`/`_add_block`/`_add_brush_stroke`), `qtbot.capture_exceptions()` (précédent :
-`tests/test_reset_ui.py::test_maj1_undo_past_an_undone_reset_targets_recreated_item`) pour les
+`tests/test_reset_ui.py::test_maj1_undo_past_an_undone_reset_restores_text_on_recreated_item`) pour les
 scénarios où une exception traverse un rappel Qt (`QTimer.singleShot`) sans faire échouer le test
 par la remontée globale de pytest-qt.
 

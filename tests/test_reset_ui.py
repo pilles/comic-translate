@@ -11,6 +11,7 @@ from __future__ import annotations
 import imkit as imk
 import numpy as np
 import pytest
+import shiboken6
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QUndoCommand, QUndoStack
@@ -730,25 +731,26 @@ def test_other_pages_untouched_by_reset(main):
 
 
 # =================================================================================================
-# Limite MAJ1 (connue, figée ici — corrigée dans une sous-étape séparée)
+# Limite MAJ1 (corrigée par la sous-étape 3a-ter, ADR-022)
 # =================================================================================================
 
 
-def test_maj1_undo_past_an_undone_reset_targets_recreated_item(main, qtbot):
-    """Fige le comportement actuel (non corrigé, `CLAUDE.md` §MAJ1) : `TextEditCommand.undo`
-    (antérieur au reset) vise l'item de texte que le reset a détruit. Après
-    Reset -> Annuler (reset, item RECRÉÉ par `load_state`) -> Annuler (au-delà), l'observé sur
-    cette machine n'est pas seulement « le bloc change mais pas le texte affiché » : c'est un
-    plantage de l'objet Qt détruit (`self.text_item` de `TextEditCommand`), capturé ici plutôt que
-    prescrit — corrigé dans une sous-étape séparée (non demandée ici)."""
+def test_maj1_undo_past_an_undone_reset_restores_text_on_recreated_item(main, qtbot):
+    """Limite MAJ1 de l'ADR-020, **corrigée** par la sous-étape 3a-ter (ADR-022) : la scène est
+    reconstruite par le reset (`load_image_state`), donc le `TextEditCommand` antérieur au reset
+    vise un item de texte détruit. Avant 3a-ter, Reset -> Annuler (reset) -> Annuler (au-delà)
+    levait `RuntimeError: ... already deleted` (`self.text_item`). Désormais la commande résout
+    l'item recréé : le texte est restauré sur l'item vivant et sur le bloc, sans exception."""
     file_path = "/tmp/reset_maj1.png"
     stack = _add_open_page(main, file_path)
     blk = _add_block(main, text="Hello", translation="Bonjour")
     item = _add_rendered_text_item(main, blk)
     main.image_ctrl.save_image_state(file_path)
 
+    # Modifie réellement l'item : `text_changed` met le bloc à jour (`update_text_block_from_item`)
+    # et programme la commande, validée ensuite comme le ferait la minuterie de 400 ms.
     main.text_ctrl.on_text_item_selected(item)
-    main.text_ctrl._schedule_text_change_command(item, "Salut", blk)
+    item.set_plain_text("Salut")
     main.text_ctrl._commit_pending_text_command()
     assert blk.translation == "Salut"
 
@@ -758,19 +760,28 @@ def test_maj1_undo_past_an_undone_reset_targets_recreated_item(main, qtbot):
     stack.undo()  # annule le reset : bloc restauré, item RECRÉÉ (nouvel objet Qt)
     assert len(main.blk_list) == 1
     assert main.blk_list[0] is blk
+    assert shiboken6.isValid(item) is False  # l'objet d'origine est bien détruit
+    assert [i.toPlainText() for i in main.image_viewer.text_items] == ["Salut"]
 
-    # Aller au-delà : annule le `TextEditCommand` antérieur au reset, dont `self.text_item` vise
-    # l'ancien objet Qt détruit par le reset (`app/ui/commands/text_edit.py:23`,
-    # `app/controllers/text.py:477-479`). Capturé ici (précédent : `qtbot.capture_exceptions`,
-    # documentation pytest-qt) plutôt que laissé faire échouer le test par la remontée globale de
-    # pytest-qt — la limite MAJ1 est un défaut connu, pas une régression de ce lot.
+    # `qtbot.capture_exceptions` : une exception dans `undo`/`redo` ne doit plus exister (avant
+    # 3a-ter, elle était capturée ici plutôt que de faire échouer le test par la remontée
+    # globale de pytest-qt).
     with qtbot.capture_exceptions() as exceptions:
-        stack.undo()
+        stack.undo()  # au-delà du reset : annule la correction de texte
+    assert exceptions == []
 
-    assert len(exceptions) == 1
-    exc_type, exc_value, _tb = exceptions[0]
-    assert exc_type is RuntimeError
-    assert "already deleted" in str(exc_value)
+    live_items = main.image_viewer.text_items
+    assert len(live_items) == 1
+    assert shiboken6.isValid(live_items[0])
+    assert live_items[0].toPlainText() == "Bonjour"
+    assert blk.translation == "Bonjour"
+
+    with qtbot.capture_exceptions() as exceptions:
+        stack.redo()
+    assert exceptions == []
+    assert len(main.image_viewer.text_items) == 1
+    assert main.image_viewer.text_items[0].toPlainText() == "Salut"
+    assert blk.translation == "Salut"
 
 
 # =================================================================================================
@@ -908,8 +919,8 @@ def test_ctpr_roundtrip_after_reset_then_undo_restores_content(main, qtbot, tmp_
 # =================================================================================================
 # Chaîne réaliste : Détecter -> Reconnaître/Traduire (factices) -> Rendre -> réinitialiser ->
 # annuler au-delà (pas de plantage natif, pile cohérente) — sans toucher au texte via une commande
-# Qt avant le reset (la limite MAJ1 figée plus haut concerne spécifiquement `TextEditCommand`,
-# pas `AddRectangleCommand`).
+# Qt avant le reset (le cas `TextEditCommand` — ex-limite MAJ1, corrigée en 3a-ter — est couvert
+# plus haut et dans `tests/test_text_undo_ui.py`, pas ici).
 # =================================================================================================
 
 
@@ -981,7 +992,7 @@ def test_realistic_chain_undo_past_reset_no_crash_stack_stays_coherent(main, mon
     assert stack.canRedo() is True
 
     # Annuler au-delà : annule `AddRectangleCommand` (posé avant le reset), jamais de
-    # `TextEditCommand` ici (contrairement à la limite MAJ1) -> pas de plantage natif attendu.
+    # `TextEditCommand` ici (cas couvert séparément, ex-limite MAJ1) -> pas de plantage natif.
     stack.undo()
     assert stack.index() == count_after_detect - 1
     assert main.blk_list == []

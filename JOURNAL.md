@@ -1,5 +1,38 @@
 # JOURNAL
 
+## 2026-09-30 — Spec 04 jalon 3 (3a-ter) : annulations de texte robustes aux items recréés ; diagnostic des sauts de ligne
+
+- Chaîne : architect → session interrompue → critic relancé (« Acceptable to proceed », conditions
+  M1-M5) → décisions de Philippe D1/D2/D3 → implementer → tester (OK, 20 tests ajoutés sur les vrais
+  chemins) → **validation manuelle de Philippe reçue le 2026-09-30** (« tous les tests passent »).
+- **Défaut corrigé (MAJ1, ADR-020)** : `TextEditCommand`, `TextFormatCommand`, `RestoreVersionCommand`
+  mémorisaient l'objet `TextBlockItem` ; après navigation, reset annulé ou rendu annulé/rétabli,
+  l'item était détruit → `RuntimeError` ou annulation sans effet visible.
+- **Option A retenue** (ADR-022) : `modules/text_undo/` — `match.py` pur, `resolve.py` (shiboken6) ;
+  chemin nominal identique à l'amont ; item recréé retrouvé dans la scène (position ±5 px, rotation
+  ±1°, texte attendu toujours vérifié, égalité → refus) ; bloc mort jamais écrit (critic M3).
+- **Décisions de Philippe** : D1 édition en attente validée au changement de page ; D2 item
+  introuvable → bloc vivant seul ou rien, pas de message ; D3 commandes de boîtes à part (3a-quater).
+  Critic M1 bis : validation aussi juste avant Annuler/Rétablir (raccourci + `pressed` des boutons).
+- **Amont** : 7 lignes `# fork:` dans 5 fichiers (`text_edit.py` 2, `textformat.py` 2, `image.py` 1,
+  `shortcuts.py` 1, `tests/conftest.py` 1). Exception à l'ADR-012 : chemin « bloc seul » de
+  `TextEditCommand` sans `set_text` (rattrapé par `flush_pending`).
+- Tests : 55 hors GUI + ~44 `--gui` ; 399 passed hors GUI, `--gui` 627 passed, 4 skipped, 1 failed
+  (`test_app.py`, amont connu). Un plantage natif non attribué une fois (famille ADR-018 probable),
+  relance verte.
+- **Limite corrigée à la main dans les docs** : la promesse « corriger MAJ1 règle changer de page
+  puis revenir » n'était vraie que pour le texte ; boîtes tracées à la main → 3a-quater.
+- **Signalement de Philippe : sauts de ligne des traductions** (« je suis obligé d'éditer le texte à
+  la main… je sais pas si c'est la traduction ou l'application »). **Diagnostiqué, pas corrigé.**
+  Lecture de `project_20260920_181633.ctpr`, page 013 : 5 traductions sur 10 contiennent un `\n` ;
+  la bulle « IL POUVAIT TRANSFORMER… » est sur une ligne à l'origine `cache` (18:38:13) et porte un
+  `\n` à l'origine `manual` (18:39:43, au rendu). **Ce n'est pas la traduction (ADR-017 fonctionne),
+  c'est le rendu** : `pyside_word_wrap` coupe, `update_text_block_from_item` réécrit les coupures
+  dans `blk.translation`. Hypothèse à confirmer : coupe sur la largeur du texte anglais (`blk.xyxy`)
+  et non de la bulle. Nouvelle sous-étape **3d — sauts de ligne du rendu** consignée dans la spec 04.
+- Reste à faire : **3a-quater** (commandes de boîtes à liste `blk_list` orpheline), **3d**, suite du
+  jalon 3 (barre d'étapes, « Continuer », messages de résultat).
+
 ## 2026-09-28 (troisième passage) — Spec 04 jalon 3 (3a-bis) : macros d'annulation orphelines corrigées
 
 - Chaîne de conception : architect (option D, ouvrir la macro dans le rappel de succès plutôt qu'au

@@ -1,5 +1,6 @@
 from PySide6.QtGui import QUndoCommand
 from .base import RectCommandBase
+from modules.text_undo.resolve import resolve_format_target  # fork: cible résolue à chaque application (3a-ter, ADR-022)
 
 class TextFormatCommand(QUndoCommand, RectCommandBase):
     def __init__(self, viewer, item):
@@ -21,9 +22,7 @@ class TextFormatCommand(QUndoCommand, RectCommandBase):
         self.new_html = self.item.toHtml()
 
     def _get_item(self, properties):
-        if self.item and self.item.scene() == self.scene:
-            return self.item
-        return self.find_matching_txt_item(self.scene, properties)
+        return resolve_format_target(self, self.scene, properties)  # fork: item recréé/détruit -> résolution + liste blanche de format (3a-ter, ADR-022) ; remplace le repli find_matching_txt_item
 
     def redo(self):
         if self.new_dict is None:

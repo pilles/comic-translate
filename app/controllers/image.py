@@ -1139,6 +1139,7 @@ class ImageStateController:
 
     def display_image(self, index: int, switch_page: bool = True):
         if 0 <= index < len(self.main.image_files):
+            self.main.text_ctrl._commit_pending_text_command()  # fork: valider l'édition de texte en attente (400 ms) sur la pile de la page quittée, avant que la scène ne soit vidée (3a-ter D1, ADR-022) ; jamais appelé depuis un redo/undo
             if switch_page:
                 self.save_current_image_state()
             self.main.curr_img_idx = index

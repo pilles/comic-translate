@@ -41,6 +41,7 @@ _GUI_ONLY_FILES = {
     "test_reset_ui.py",  # fork: bouton Réinitialiser la page (spec 04 jalon 3, 3a)
     "test_analysis_on_original.py",  # fork: analyse sur l'original (hotfix 2026-09-27)
     "test_undo_guard_ui.py",  # fork: verrou d'annulation nettoyage/segmentation (spec 04 jalon 3, 3a-bis)
+    "test_text_undo_ui.py",  # fork: annulations de texte robustes aux items recréés (spec 04 jalon 3, 3a-ter)
 }
 
 
